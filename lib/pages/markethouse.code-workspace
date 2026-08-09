@@ -1,0 +1,14 @@
+{
+    "folders": [
+        {
+            "path": "../.."
+        },
+        {
+            "path": "../../../../Users/USER/go/src/markethouse"
+        }
+    ],
+    "settings": {
+        "geminicodeassist.agentDebugMode": true,
+        "geminicodeassist.agentYoloMode": true
+    }
+}

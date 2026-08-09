@@ -1,0 +1,240 @@
+xu: 1
+kind: ApplicationBuildRunbook
+metadata:
+  name: market-house-read-scripts
+  owner: workflow:market-house-editor
+  status: draft
+  mode: build-app
+intent:
+  rawPrompt: can u read my scripts
+  purpose: >-
+    Read and understand the user's existing scripts in the workspace (including any agent/skill
+    documentation) and produce a concise summary of what they do plus any notes needed to proceed.
+  users:
+    - owning editor
+    - workflow:market-house-editor
+  goals:
+    - Identify and list the scripts available in the workspace
+    - Open and interpret relevant script files (including .claude skill metadata)
+    - Summarize each script's purpose, entrypoints, and key behavior
+    - Detect obvious issues (missing env vars, broken references, inconsistent naming)
+    - Recommend next actions (e.g., run/test commands or further review steps)
+  nonGoals:
+    - Modifying user scripts without explicit approval
+    - Executing scripts or deploying anything to production
+    - Claiming full correctness without reading the actual files
+    - Generating unrelated features beyond the scope of reading/summarizing scripts
+  constraints:
+    - No code execution required for initial read-through
+    - Must preserve existing workspace structure
+    - Follow DryLake safety rules for any command execution
+    - >-
+      Only act on files that are present in the workspace context or discovered during the review
+      phases
+confirmation:
+  required: true
+  status: pending
+  userApprovedIntent: false
+  userApprovedArchitecture: false
+  userApprovedProvisioning: false
+architecture:
+  status: proposed
+  summary: >-
+    A lightweight, read-only analysis workflow that scans the workspace for script files, parses
+    relevant documentation (notably the existing .claude skill), and produces a structured summary
+    and findings. No infrastructure changes are required.
+  decisions:
+    - id: arch-readonly
+      choice: Read-only analysis first, no execution
+      rationale: >-
+        User asked to read scripts; safer to avoid running unknown code and to provide an accurate
+        summary based on file contents.
+    - id: arch-discovery
+      choice: Enumerate files before deep parsing
+      rationale: >-
+        Ensures all relevant scripts are found and prevents missing entrypoints or referenced
+        modules.
+    - id: arch-output
+      choice: Produce a per-script summary plus next-step recommendations
+      rationale: >-
+        Makes results immediately usable and clarifies what to do next (e.g., tests/commands) once
+        reading is complete.
+  risks:
+    - >-
+      Scripts may require environment variables or access to external resources; summaries might be
+      incomplete without that context
+    - >-
+      Large repositories could make full reading time-consuming; the workflow may need focusing on
+      entrypoints
+    - The workspace may contain sensitive data; outputs should avoid printing secrets or credentials
+  assumptions:
+    - The workspace contains identifiable script files (e.g., shell, Python, Node, or configuration)
+    - The existing .claude skill file is relevant metadata and not a secret container
+    - The user will approve any subsequent steps that require execution or code changes
+provisioning:
+  status: draft
+  commands: []
+  filesToCreate: []
+  environmentVariables: []
+  externalServices: []
+  safety:
+    requiresApprovalBeforeExecution: true
+    executeAutomatically: false
+phases:
+  - id: phase-1-discover
+    title: Discover scripts and entrypoints
+    agent: codex
+    gate: pending
+    status: pending
+    objective: Enumerate script files in the workspace and identify likely entrypoints to read next.
+    inputs:
+      - Workspace market_house file tree
+      - Detected agent files list (at least .claude/skills/skill-creator/SKILL.md)
+    outputs:
+      - A categorized inventory of scripts/config/docs
+      - A shortlist of likely entrypoints and referenced modules
+    steps:
+      - id: s1-scan
+        text: >-
+          Scan the workspace for files that look like scripts or script entrypoints (e.g., *.sh,
+          *.bash, *.py, *.js, *.ts, *.mjs, *.cjs, Makefile, package.json scripts, workflows, and
+          common config files). Also include .claude/skills/**/SKILL.md and any referenced docs.
+        status: pending
+      - id: s2-categorize
+        text: >-
+          Categorize discovered files by type (shell/python/node/other/config/docs) and note
+          relationships (imports, require, includes, referenced scripts).
+        status: pending
+      - id: s3-shortlist
+        text: >-
+          Select a shortlist of entrypoints based on discovery heuristics (package scripts, main
+          modules, CLI wrappers, workflow triggers).
+        status: pending
+    acceptance:
+      - >-
+        Inventory includes the detected .claude skill file and at least one other script category
+        (if present)
+      - Entry points shortlist is present and references exact file paths
+      - No secrets are printed in outputs (if secrets are detected, redact in the report)
+  - id: phase-2-read-parse
+    title: Read and interpret key scripts
+    agent: claude-code
+    gate: pending
+    status: pending
+    objective: >-
+      Open the shortlisted scripts, extract intent/purpose, and map execution flow without running
+      code.
+    inputs:
+      - Shortlist of entrypoints from phase 1
+      - Script file contents from the workspace
+    outputs:
+      - "Per-script summaries: purpose, inputs/outputs, key functions/steps"
+      - A dependency map (who calls/imports what)
+      - Notes on required environment variables and assumptions
+    steps:
+      - id: s1-open
+        text: >-
+          Read each shortlisted entrypoint file and any directly referenced modules needed to
+          understand the flow (imports/includes).
+        status: complete
+      - id: s2-extract
+        text: >-
+          Extract: (a) what the script does, (b) how to run it (CLI args/Make targets), (c) what
+          files it reads/writes, (d) what external services/tools it calls (if any).
+        status: pending
+      - id: s3-redact
+        text: >-
+          Redact credentials/secrets if found (API keys, tokens, password strings). Summarize usage
+          without reproducing secret values.
+        status: pending
+      - id: s4-flow
+        text: >-
+          Build a concise execution flow description per entrypoint (sequence of operations) and
+          note error handling/edge cases visible in code.
+        status: pending
+    acceptance:
+      - >-
+        For each entrypoint, a summary includes run instructions (as specified in code) and main
+        operations
+      - A dependency map indicates relationships between scripts/modules
+      - Any missing context (env vars, required files) is explicitly called out
+  - id: phase-3-report-next-steps
+    title: Produce findings and safe next steps
+    agent: gemini
+    gate: pending
+    status: pending
+    objective: >-
+      Deliver a structured report and propose safe next actions (including optional execution steps
+      only after approval).
+    inputs:
+      - Summaries and dependency map from phase 2
+      - Any visible build/test commands in scripts (if present)
+    outputs:
+      - "A final report: overview + per-script findings"
+      - A prioritized list of issues/questions
+      - Suggested next DryLake steps (e.g., run tests) gated by user approval
+    steps:
+      - id: s1-overview
+        text: "Create an overview: overall purpose of the script set and how they fit together."
+        status: pending
+      - id: s2-findings
+        text: >-
+          List findings: key behaviors, potential pitfalls, and inconsistencies (naming, missing
+          references).
+        status: pending
+      - id: s3-checks
+        text: >-
+          Infer likely validation steps (lint/test/build commands) but do not run them unless the
+          user approves execution.
+        status: pending
+      - id: s4-questions
+        text: >-
+          Ask targeted follow-up questions (e.g., which entrypoint to run, expected inputs, required
+          environment).
+        status: pending
+    acceptance:
+      - Report is structured and references exact file paths
+      - Next steps are clearly labeled as optional and require approval for execution
+      - No secrets are included in the report
+checks:
+  install: >-
+    If package-managed: ensure dependencies could be installed (e.g., npm/yarn/pip) without
+    executing; otherwise skip. Validate presence of package.json/requirements.txt/pyproject.toml.
+  dev: >-
+    Check for dev tooling configs (eslint/prettier/pytest) and confirm scripts exist in config; do
+    not run.
+  build: >-
+    Check for build scripts (e.g., npm run build, tsc, make build) by scanning for build
+    definitions; do not run.
+  test: >-
+    Check for test definitions (e.g., pytest, jest, CI configs) and list recommended commands; do
+    not run.
+  lint: >-
+    Check for lint configs (eslint, ruff, flake8, golangci-lint) and list lint commands found; do
+    not run.
+agentTargets:
+  agentsMd: true
+  claudeMd: true
+  copilotInstructions: false
+  cursorRules: true
+  codexSkill: true
+  openclawSkill: false
+handoff:
+  defaultAgent: claude-code
+  autopilot: false
+  instructions:
+    - >-
+      Operate read-only: do not execute scripts or install dependencies in this run unless the user
+      explicitly approves execution in a later step.
+    - >-
+      When reading files, produce concise summaries with exact file paths and key behavior; avoid
+      verbatim copying large sections.
+    - >-
+      Redact secrets/tokens/passwords if encountered; summarize usage patterns without exposing
+      values.
+    - >-
+      If multiple entrypoints exist, prefer the ones referenced by package/workflow configs and note
+      alternates.
+    - >-
+      If the workspace contains only documentation (e.g., .claude skill), treat that as the primary
+      source and still produce a script-like summary of what the skill/job would do.

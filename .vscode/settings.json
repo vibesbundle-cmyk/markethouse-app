@@ -1,0 +1,12 @@
+{
+    "dart.flutterHotReloadOnSave": true,
+    "dart.openDevTools": "flutter",
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    "[dart]": {
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit"
+        }
+    }
+}

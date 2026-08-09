@@ -1,0 +1,13 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "MarketHouse (hot reload on save)",
+            "type": "flutter",
+            "request": "launch",
+            "flutterMode": "debug",
+            "deviceId": "",
+            "args": []
+        }
+    ]
+}
