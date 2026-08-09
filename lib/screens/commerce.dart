@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:provider/provider.dart';
 import '../widgets/in_app_gallery_picker.dart';
 import '../widgets/location_picker.dart';
+import '../widgets/location_map.dart';
 import '../theme/colors.dart';
 import '../theme/dark.dart';
 import 'chat_window.dart';
@@ -972,7 +973,7 @@ void _showListingDetail(BuildContext context, Map item, bool dk) {
               ..._detailRow('Stock', item['stock'] == null ? 'Always in stock' : ((item['stock'] as num).toInt() == 0 ? 'Out of stock' : item['stock'].toString()), dk),
               ..._detailRow('SKU', item['sku'], dk),
               ..._detailRow('Delivery', item['delivery_available'] == true ? 'Available' : null, dk),
-              ..._detailRow('Location', item['location'], dk),
+              ..._locationRow(context, item['location'], item, dk),
               ...metadata.entries.map((e) => _detailRow(
                   e.key.toString().replaceAll('_', ' ').split(' ').map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1)).join(' '),
                   e.value?.toString(), dk)).expand((x) => x),
@@ -1014,6 +1015,55 @@ List<Widget> _detailRow(String label, dynamic value, bool dk) {
           style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL))),
         Expanded(child: Text(value.toString(),
           style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL))),
+      ]),
+    ),
+  ];
+}
+
+/// Product/business location row — tappable to open a full-screen map when
+/// the listing carries coordinates, plain text otherwise.
+List<Widget> _locationRow(BuildContext ctx, dynamic value, Map item, bool dk) {
+  if (value == null || value.toString().trim().isEmpty) return [];
+  double? lat, lng;
+  final rLat = item['latitude'];
+  final rLng = item['longitude'];
+  if (rLat != null && rLng != null) {
+    lat = rLat is num ? rLat.toDouble() : double.tryParse(rLat.toString());
+    lng = rLng is num ? rLng.toDouble() : double.tryParse(rLng.toString());
+  }
+  final hasCoords = lat != null && lng != null;
+  final text = Text(value.toString(),
+      style: TextStyle(
+          fontSize: 13,
+          color: hasCoords ? C.green : (dk ? C.textD : C.textL),
+          fontWeight: hasCoords ? FontWeight.w600 : FontWeight.w400));
+  return [
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(width: 100, child: Text('Location',
+          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL))),
+        Expanded(
+          child: hasCoords
+              ? GestureDetector(
+                  onTap: () => Navigator.push(
+                    ctx,
+                    MaterialPageRoute(
+                      builder: (_) => Scaffold(
+                        appBar: AppBar(title: const Text('Location')),
+                        body: LocationMap(
+                            me: ll.LatLng(lat!, lng!), showRoute: false),
+                      ),
+                    ),
+                  ),
+                  child: Row(children: [
+                    Flexible(child: text),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.map_outlined, size: 14, color: C.green),
+                  ]),
+                )
+              : text,
+        ),
       ]),
     ),
   ];

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart' as ll;
 import 'package:provider/provider.dart';
+import '../widgets/location_picker.dart';
+import '../services/location_service.dart';
 import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../theme/state.dart';
@@ -543,10 +546,9 @@ class _BusinessUpgradePageState extends State<BusinessUpgradePage> {
   final _phoneCtl = TextEditingController();
   final _emailCtl = TextEditingController();
   final _websiteCtl = TextEditingController();
-  final _addressCtl = TextEditingController();
-  final _countryCtl = TextEditingController();
-  final _stateCtl = TextEditingController();
-  final _cityCtl = TextEditingController();
+  double? _lat, _lng;
+  String _locationLabel = '';
+  bool _locating = false;
 
   @override
   void initState() {
@@ -572,10 +574,9 @@ class _BusinessUpgradePageState extends State<BusinessUpgradePage> {
       _phoneCtl.text = split.$2;
       _emailCtl.text = user.businessEmail ?? '';
       _websiteCtl.text = user.businessWebsite ?? '';
-      _addressCtl.text = user.businessAddress ?? '';
-      _countryCtl.text = user.businessCountry ?? '';
-      _stateCtl.text = user.businessState ?? '';
-      _cityCtl.text = user.businessCity ?? '';
+      _locationLabel = user.businessAddress ?? '';
+      _lat = double.tryParse(user.latitude ?? '');
+      _lng = double.tryParse(user.longitude ?? '');
     }
   }
 
@@ -587,15 +588,47 @@ class _BusinessUpgradePageState extends State<BusinessUpgradePage> {
       _descCtl,
       _phoneCtl,
       _emailCtl,
-      _websiteCtl,
-      _addressCtl,
-      _countryCtl,
-      _stateCtl,
-      _cityCtl
+      _websiteCtl
     ]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _pickLocation() async {
+    final picked = await pickLocationOnMap(context,
+        initial: (_lat != null && _lng != null) ? ll.LatLng(_lat!, _lng!) : null,
+        hint: 'Set business location');
+    if (picked == null || !mounted) return;
+    _lat = picked.latitude;
+    _lng = picked.longitude;
+    final label = await LocationService()
+        .resolveAddress(picked.latitude, picked.longitude);
+    if (mounted) {
+      setState(() => _locationLabel = label ??
+          '${picked.latitude.toStringAsFixed(4)}, ${picked.longitude.toStringAsFixed(4)}');
+    }
+  }
+
+  Future<void> _useMyLocation() async {
+    setState(() => _locating = true);
+    final pos = await LocationService().getCurrentPosition();
+    if (pos != null && mounted) {
+      _lat = pos.latitude;
+      _lng = pos.longitude;
+      final label =
+          await LocationService().resolveAddress(pos.latitude, pos.longitude);
+      if (mounted) {
+        setState(() => _locationLabel = label ??
+            '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}');
+      }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not get your location — check permission'),
+          backgroundColor: C.err,
+          behavior: SnackBarBehavior.floating));
+    }
+    if (mounted) setState(() => _locating = false);
   }
 
   Future<void> _submit() async {
@@ -609,10 +642,9 @@ class _BusinessUpgradePageState extends State<BusinessUpgradePage> {
         'business_phone': _phoneCtl.text.trim().isEmpty ? '' : '$_dialCode${_phoneCtl.text.trim()}',
         'business_email': _emailCtl.text.trim(),
         'business_website': _websiteCtl.text.trim(),
-        'business_address': _addressCtl.text.trim(),
-        'business_country': _countryCtl.text.trim(),
-        'business_state': _stateCtl.text.trim(),
-        'business_city': _cityCtl.text.trim(),
+        'business_address': _locationLabel.trim(),
+        'latitude': _lat?.toString() ?? '',
+        'longitude': _lng?.toString() ?? '',
         'selling_types': _sellingTypes.toList(),
       });
       if (!mounted) return;
@@ -828,10 +860,6 @@ class _BusinessUpgradePageState extends State<BusinessUpgradePage> {
           ('Description', _descCtl, 'What does your business do?'),
           ('Email', _emailCtl, 'business@example.com'),
           ('Website', _websiteCtl, 'https://...'),
-          ('Address', _addressCtl, 'Street address'),
-          ('Country', _countryCtl, 'Nigeria'),
-          ('State', _stateCtl, 'Lagos'),
-          ('City', _cityCtl, 'Ikeja'),
         ].map((f) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child:
@@ -857,6 +885,75 @@ class _BusinessUpgradePageState extends State<BusinessUpgradePage> {
                   style:
                       TextStyle(fontSize: 14, color: dk ? C.textD : C.textL)),
             ]))),
+        const SizedBox(height: 4),
+        Text('Business Location',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: dk ? C.subD : C.subL)),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: _pickLocation,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+                color: dk ? C.surf2D : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: _lat != null && _lng != null
+                        ? C.green
+                        : (dk ? C.borderD : const Color(0xFFE5E5EA)))),
+            child: Row(children: [
+              Icon(Icons.location_on_outlined,
+                  size: 20,
+                  color: _lat != null && _lng != null
+                      ? C.green
+                      : (dk ? C.subD : C.subL)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                    _locationLabel.isEmpty
+                        ? 'Set your business location on the map'
+                        : _locationLabel,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: _lat != null && _lng != null
+                            ? (dk ? C.textD : C.textL)
+                            : (dk ? C.subD : C.subL))),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.edit_location_alt_outlined,
+                  color: C.green, size: 20),
+            ]),
+          ),
+        ),
+        if (_locationLabel.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          GestureDetector(
+            onTap: _locating ? null : _useMyLocation,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              _locating
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          color: C.green, strokeWidth: 2))
+                  : const Icon(Icons.my_location_rounded,
+                      color: C.green, size: 15),
+              const SizedBox(width: 5),
+              Text('Use my current location',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: C.green)),
+            ]),
+          ),
+        ],
         Text('What will you sell?',
             style: TextStyle(
                 fontSize: 13,

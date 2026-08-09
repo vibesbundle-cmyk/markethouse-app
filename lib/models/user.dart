@@ -17,6 +17,10 @@ class User {
   final bool isFollowing;
   final int reputation;
 
+  // Last known location pin (used for nearby feeds and as the business pin)
+  final String? latitude;
+  final String? longitude;
+
   // Business profile details — only meaningful when accountType is business
   final String? businessName;
   final String? businessCategory;
@@ -45,6 +49,8 @@ class User {
     this.isVerified = false,
     this.isFollowing = false,
     this.reputation = 0,
+    this.latitude,
+    this.longitude,
     this.businessName,
     this.businessCategory,
     this.businessDesc,
@@ -85,6 +91,8 @@ class User {
         isVerified: j['is_verified'] ?? false,
         isFollowing: j['is_following'] ?? false,
         reputation: j['reputation'] ?? 0,
+        latitude: j['latitude']?.toString(),
+        longitude: j['longitude']?.toString(),
         businessName: j['business_name'],
         businessCategory: j['business_category'],
         businessDesc: j['business_desc'],
@@ -98,11 +106,13 @@ class User {
       );
 
   User copyWith(
-          {String? fullName,
+          {          String? fullName,
           String? username,
           String? bio,
           String? profilePhoto,
           String? headerPhoto,
+          String? latitude,
+          String? longitude,
           AccountType? accountType,
           String? businessName,
           String? businessCategory,
@@ -123,6 +133,8 @@ class User {
         bio: bio ?? this.bio,
         profilePhoto: profilePhoto ?? this.profilePhoto,
         headerPhoto: headerPhoto ?? this.headerPhoto,
+        latitude: latitude ?? this.latitude,
+        longitude: longitude ?? this.longitude,
         accountType: accountType ?? this.accountType,
         posts: posts,
         following: following,

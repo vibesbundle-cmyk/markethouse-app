@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart' as ll;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../widgets/bits.dart' show CountryCodePhoneField, splitPhoneForEditing;
+import '../widgets/location_picker.dart';
+import '../widgets/location_map.dart';
+import '../services/location_service.dart';
 import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../theme/state.dart';
@@ -2723,15 +2727,22 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
   late final _phoneCtl = TextEditingController(text: _phoneSplit.$2);
   late final _emailCtl = TextEditingController(text: widget.user.businessEmail ?? '');
   late final _websiteCtl = TextEditingController(text: widget.user.businessWebsite ?? '');
-  late final _addressCtl = TextEditingController(text: widget.user.businessAddress ?? '');
-  late final _cityCtl = TextEditingController(text: widget.user.businessCity ?? '');
-  late final _stateCtl = TextEditingController(text: widget.user.businessState ?? '');
-  late final _countryCtl = TextEditingController(text: widget.user.businessCountry ?? '');
+  double? _lat, _lng;
+  String _locationLabel = '';
+  bool _locating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _locationLabel = widget.user.businessAddress ?? '';
+    _lat = double.tryParse(widget.user.latitude ?? '');
+    _lng = double.tryParse(widget.user.longitude ?? '');
+  }
 
   @override
   void dispose() {
     for (final c in [_nameCtl, _descCtl, _categoryCtl, _phoneCtl, _emailCtl,
-        _websiteCtl, _addressCtl, _cityCtl, _stateCtl, _countryCtl]) {
+        _websiteCtl]) {
       c.dispose();
     }
     super.dispose();
@@ -2748,10 +2759,9 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
         'business_phone': fullPhone,
         'business_email': _emailCtl.text.trim(),
         'business_website': _websiteCtl.text.trim(),
-        'business_address': _addressCtl.text.trim(),
-        'business_city': _cityCtl.text.trim(),
-        'business_state': _stateCtl.text.trim(),
-        'business_country': _countryCtl.text.trim(),
+        'business_address': _locationLabel.trim(),
+        'latitude': _lat?.toString() ?? '',
+        'longitude': _lng?.toString() ?? '',
       });
       if (!mounted) return;
       final ap = context.read<AppState>();
@@ -2766,10 +2776,9 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
           businessPhone: fullPhone,
           businessEmail: _emailCtl.text.trim(),
           businessWebsite: _websiteCtl.text.trim(),
-          businessAddress: _addressCtl.text.trim(),
-          businessCity: _cityCtl.text.trim(),
-          businessState: _stateCtl.text.trim(),
-          businessCountry: _countryCtl.text.trim(),
+          businessAddress: _locationLabel.trim(),
+          latitude: _lat?.toString(),
+          longitude: _lng?.toString(),
         ));
       }
       ap.fetchProfile(); // best-effort background refresh, not awaited/relied upon
@@ -2788,6 +2797,33 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
             behavior: SnackBarBehavior.floating));
       }
     }
+  }
+
+  Future<void> _pickLocation() async {
+    final picked = await pickLocationOnMap(context,
+        initial: (_lat != null && _lng != null) ? ll.LatLng(_lat!, _lng!) : null,
+        hint: 'Set business location');
+    if (picked == null || !mounted) return;
+    _lat = picked.latitude;
+    _lng = picked.longitude;
+    final label = await LocationService()
+        .resolveAddress(picked.latitude, picked.longitude);
+    if (mounted) {
+      setState(() => _locationLabel = label ??
+          '${picked.latitude.toStringAsFixed(4)}, ${picked.longitude.toStringAsFixed(4)}');
+    }
+  }
+
+  void _openLocationMap() {
+    if (_lat == null || _lng == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => Scaffold(
+              appBar: AppBar(title: const Text('Business location')),
+              body: LocationMap(
+                  me: ll.LatLng(_lat!, _lng!), showRoute: false))),
+    );
   }
 
   Widget _field(String label, TextEditingController ctl, bool dk, {int maxLines = 1}) =>
@@ -2862,10 +2898,88 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
             ),
             _field('Email', _emailCtl, dk),
             _field('Website', _websiteCtl, dk),
-            _field('Address', _addressCtl, dk),
-            _field('City', _cityCtl, dk),
-            _field('State', _stateCtl, dk),
-            _field('Country', _countryCtl, dk),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Business Location',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL)),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: _pickLocation,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                        color: dk ? C.surf2D : const Color(0xFFF2F2F7),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: _lat != null && _lng != null
+                                ? C.green
+                                : (dk ? C.borderD : const Color(0xFFE5E5EA)))),
+                    child: Row(children: [
+                      Icon(Icons.location_on_outlined,
+                          size: 20,
+                          color: _lat != null && _lng != null
+                              ? C.green
+                              : (dk ? C.subD : C.subL)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                            _locationLabel.isEmpty
+                                ? 'Set your business location on the map'
+                                : _locationLabel,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: _lat != null && _lng != null
+                                    ? (dk ? C.textD : C.textL)
+                                    : (dk ? C.subD : C.subL))),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.edit_location_alt_outlined,
+                          color: C.green, size: 20),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _locating ? null : () async {
+                    setState(() => _locating = true);
+                    final pos = await LocationService().getCurrentPosition();
+                    if (pos != null) {
+                      _lat = pos.latitude;
+                      _lng = pos.longitude;
+                      final label = await LocationService()
+                          .resolveAddress(pos.latitude, pos.longitude);
+                      if (mounted) {
+                        setState(() => _locationLabel = label ??
+                            '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}');
+                      }
+                    }
+                    if (mounted) setState(() => _locating = false);
+                  },
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    _locating
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                color: C.green, strokeWidth: 2))
+                        : const Icon(Icons.my_location_rounded,
+                            color: C.green, size: 15),
+                    const SizedBox(width: 5),
+                    Text('Use my current location',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: C.green)),
+                  ]),
+                ),
+              ]),
+            ),
             const SizedBox(height: 6),
             SizedBox(
               width: double.infinity,
@@ -2899,12 +3013,14 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
             ..._infoRow('Phone', _phoneCtl.text.trim().isEmpty ? '' : '$_dialCode ${_phoneCtl.text.trim()}', dk),
             ..._infoRow('Email', _emailCtl.text, dk),
             ..._infoRow('Website', _websiteCtl.text, dk, isLink: true),
-            ..._infoRow('Address', _addressCtl.text, dk),
-            ..._infoRow('Location', [_cityCtl.text, _stateCtl.text, _countryCtl.text]
-                .where((s) => s.trim().isNotEmpty).join(', '), dk),
+            if (_locationLabel.isNotEmpty) ...[
+              ..._infoRow('Address', _locationLabel, dk,
+                  onTap: _lat != null && _lng != null ? _openLocationMap : null,
+                  trailingIcon: _lat != null && _lng != null),
+            ],
             if (isBusiness &&
                 _categoryCtl.text.isEmpty && _phoneCtl.text.isEmpty &&
-                _emailCtl.text.isEmpty && _addressCtl.text.isEmpty) ...[
+                _emailCtl.text.isEmpty && _locationLabel.isEmpty) ...[
               const SizedBox(height: 6),
               Text('No business details added yet.',
                   textAlign: TextAlign.center,
@@ -2926,12 +3042,15 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
     );
   }
 
-  List<Widget> _infoRow(String label, String value, bool dk, {bool isLink = false}) {
+  List<Widget> _infoRow(String label, String value, bool dk,
+      {bool isLink = false, VoidCallback? onTap, bool trailingIcon = false}) {
     if (value.trim().isEmpty) return [];
     final valueWidget = Text(value,
         style: TextStyle(
             fontSize: 13,
-            color: isLink ? C.green : (dk ? C.textD : C.textL),
+            color: onTap != null || isLink
+                ? C.green
+                : (dk ? C.textD : C.textL),
             decoration: isLink ? TextDecoration.underline : null,
             decorationColor: isLink ? C.green : null));
     return [
@@ -2946,10 +3065,18 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
                       fontWeight: FontWeight.w600,
                       color: dk ? C.subD : C.subL))),
           Expanded(
-              child: isLink
+              child: (onTap != null || isLink)
                   ? GestureDetector(
-                      onTap: () => _openLink(value),
-                      child: valueWidget)
+                      onTap: isLink ? () => _openLink(value) : onTap,
+                      child: Row(children: [
+                        Flexible(child: valueWidget),
+                        if (trailingIcon) ...[
+                          const SizedBox(width: 4),
+                          const Icon(Icons.map_outlined,
+                              size: 14, color: C.green),
+                        ],
+                      ]),
+                    )
                   : valueWidget),
         ]),
       ),
