@@ -3,7 +3,7 @@
 //
 // Needs the `photo_manager` package (see pubspec snippet you were given)
 // plus the OS photo-permission entries in AndroidManifest.xml / Info.plist.
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -19,6 +19,20 @@ Future<List<XFile>> pickImagesInApp(
   int maxImages = 10,
   bool allowVideo = false,
 }) async {
+  // photo_manager is mobile-only. On web fall back to image_picker's native
+  // browser file dialog (multi-select), which returns the same XFile list.
+  if (kIsWeb) {
+    try {
+      final picked = await ImagePicker().pickMultiImage(imageQuality: 90);
+      if (allowVideo) {
+        final v = await ImagePicker().pickVideo(source: ImageSource.gallery);
+        if (v != null) return [v, ...picked];
+      }
+      return picked.take(maxImages).toList();
+    } catch (e) {
+      return [];
+    }
+  }
   final permission = await PhotoManager.requestPermissionExtend();
   if (!permission.isAuth && !permission.hasAccess) {
     if (context.mounted) {

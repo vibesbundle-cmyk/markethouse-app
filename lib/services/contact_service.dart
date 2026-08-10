@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 
 import '../services/api.dart';
@@ -13,6 +14,16 @@ class ContactSyncService {
   /// already belong to a MarketHouse account. Returns an empty result when
   /// the permission is denied.
   Future<SyncResult> syncDeviceContacts() async {
+    // flutter_contacts is mobile-only — a browser has no address book, so
+    // web just reports zero (suggestions still come from the backend).
+    if (kIsWeb) {
+      return SyncResult(
+        syncedCount: 0,
+        totalContacts: 0,
+        activeCount: 0,
+        activeMatches: const [],
+      );
+    }
     final status =
         await FlutterContacts.permissions.request(PermissionType.read);
     if (status != PermissionStatus.granted && status != PermissionStatus.limited) {
