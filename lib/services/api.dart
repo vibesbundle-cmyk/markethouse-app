@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'app_storage.dart';
 import '../models/user.dart';
 
@@ -383,14 +384,14 @@ class Api {
   }
 
   static Future<String?> uploadMedia(
-      String filePath, String uploadTarget, String mediaType) async {
-    await _assertFileSize(filePath);
+      XFile file, String uploadTarget, String mediaType) async {
+    await _assertFileSize(file);
     final t = await getToken();
     final rq = http.MultipartRequest(
         'POST', Uri.parse('$_base/upload/media?type=$uploadTarget'));
     if (t != null) rq.headers['Authorization'] = 'Bearer $t';
     rq.fields['media_type'] = mediaType;
-    rq.files.add(await http.MultipartFile.fromPath('file', filePath));
+    rq.files.add(await _partFromFile('file', file));
     try {
       final rs = await rq.send().timeout(_timeout);
       final body = await rs.stream.bytesToString();
@@ -401,17 +402,17 @@ class Api {
     }
   }
 
-  static Future<String?> uploadChatMedia(String filePath, String type) async {
-    return uploadMedia(filePath, 'chat', type);
+  static Future<String?> uploadChatMedia(XFile file, String type) async {
+    return uploadMedia(file, 'chat', type);
   }
 
-  static Future<String?> uploadProfilePhoto(String filePath) async {
-    await _assertFileSize(filePath);
+  static Future<String?> uploadProfilePhoto(XFile file) async {
+    await _assertFileSize(file);
     final t = await getToken();
     final rq =
         http.MultipartRequest('POST', Uri.parse('$_base/upload/profile'));
     if (t != null) rq.headers['Authorization'] = 'Bearer $t';
-    rq.files.add(await http.MultipartFile.fromPath('file', filePath));
+    rq.files.add(await _partFromFile('file', file));
     try {
       final rs = await rq.send().timeout(_timeout);
       if (rs.statusCode == 200) {
@@ -424,12 +425,12 @@ class Api {
     return null;
   }
 
-  static Future<String?> uploadHeaderPhoto(String filePath) async {
-    await _assertFileSize(filePath);
+  static Future<String?> uploadHeaderPhoto(XFile file) async {
+    await _assertFileSize(file);
     final t = await getToken();
     final rq = http.MultipartRequest('POST', Uri.parse('$_base/upload/header'));
     if (t != null) rq.headers['Authorization'] = 'Bearer $t';
-    rq.files.add(await http.MultipartFile.fromPath('file', filePath));
+    rq.files.add(await _partFromFile('file', file));
     try {
       final rs = await rq.send().timeout(_timeout);
       if (rs.statusCode == 200) {
@@ -555,14 +556,14 @@ class Api {
 
   static Future<Map<String, dynamic>> createPost(
     String caption,
-    String? filePath, {
+    XFile? file, {
     String postType = 'social',
     double price = 0,
     bool isLocked = false,
     List<int> taggedUserIds = const [],
     String category = 'Other',
   }) async {
-    if (filePath != null) await _assertFileSize(filePath);
+    if (file != null) await _assertFileSize(file);
     final t = await getToken();
     final rq = http.MultipartRequest('POST', Uri.parse('$_base/post'));
     if (t != null) rq.headers['Authorization'] = 'Bearer $t';
@@ -574,8 +575,8 @@ class Api {
     if (taggedUserIds.isNotEmpty) {
       rq.fields['tagged_users'] = taggedUserIds.join(',');
     }
-    if (filePath != null) {
-      rq.files.add(await http.MultipartFile.fromPath('file', filePath));
+    if (file != null) {
+      rq.files.add(await _partFromFile('file', file));
     }
     try {
       final rs = await rq.send().timeout(_timeout);
@@ -590,15 +591,15 @@ class Api {
   /// types are fine, e.g. two photos and a video together.
   static Future<Map<String, dynamic>> createPostMulti(
     String caption,
-    List<String> filePaths, {
+    List<XFile> files, {
     String postType = 'social',
     double price = 0,
     bool isLocked = false,
     List<int> taggedUserIds = const [],
     String category = 'Other',
   }) async {
-    for (final p in filePaths) {
-      await _assertFileSize(p);
+    for (final f in files) {
+      await _assertFileSize(f);
     }
     final t = await getToken();
     final rq = http.MultipartRequest('POST', Uri.parse('$_base/post'));
@@ -611,8 +612,8 @@ class Api {
     if (taggedUserIds.isNotEmpty) {
       rq.fields['tagged_users'] = taggedUserIds.join(',');
     }
-    for (final p in filePaths) {
-      rq.files.add(await http.MultipartFile.fromPath('files', p));
+    for (final f in files) {
+      rq.files.add(await _partFromFile('files', f));
     }
     try {
       final rs = await rq.send().timeout(_timeout);
@@ -776,14 +777,14 @@ class Api {
   }
 
   static Future<Map<String, dynamic>> createSupply(
-      Map<String, String> fields, List<String> imagePaths) async {
+      Map<String, String> fields, List<XFile> imageFiles) async {
     final t = await getToken();
     final rq = http.MultipartRequest('POST', Uri.parse('$_base/supply'));
     if (t != null) rq.headers['Authorization'] = 'Bearer $t';
     fields.forEach((k, v) => rq.fields[k] = v);
-    for (final p in imagePaths) {
-      await _assertFileSize(p);
-      rq.files.add(await http.MultipartFile.fromPath('photos', p));
+    for (final f in imageFiles) {
+      await _assertFileSize(f);
+      rq.files.add(await _partFromFile('photos', f));
     }
     final streamed = await rq.send().timeout(_timeout);
     final resp = await http.Response.fromStream(streamed);
@@ -829,13 +830,13 @@ class Api {
   }
 
   static Future<Map<String, dynamic>> createProduct(
-      Map<String, String> fields, List<String> imagePaths) async {
+      Map<String, String> fields, List<XFile> imageFiles) async {
     final t = await getToken();
     final rq = http.MultipartRequest('POST', Uri.parse('$_base/shop/product'));
     if (t != null) rq.headers['Authorization'] = 'Bearer $t';
     fields.forEach((k, v) => rq.fields[k] = v);
-    for (final p in imagePaths) {
-      rq.files.add(await http.MultipartFile.fromPath('images', p));
+    for (final f in imageFiles) {
+      rq.files.add(await _partFromFile('images', f));
     }
     final streamed = await rq.send().timeout(_timeout);
     final resp = await http.Response.fromStream(streamed);
@@ -1013,8 +1014,14 @@ class Api {
     }
   }
 
-  static Future<void> _assertFileSize(String path) async {
-    final size = await File(path).length();
+  static Future<http.MultipartFile> _partFromFile(
+      String field, XFile file) async {
+    return http.MultipartFile.fromBytes(field, await file.readAsBytes(),
+        filename: file.name.isEmpty ? 'upload' : file.name);
+  }
+
+  static Future<void> _assertFileSize(XFile file) async {
+    final size = await file.length();
     if (size > _maxUploadBytes) {
       throw ApiException('File too large (max 50 MB).');
     }
@@ -1039,12 +1046,12 @@ class Api {
     String location = '',
     String videoUrl = '',
     Map<String, dynamic> metadata = const {},
-    List<String> imagePaths = const [],
+    List<XFile> imageFiles = const [],
     double? latitude,
     double? longitude,
   }) async {
-    for (final p in imagePaths) {
-      await _assertFileSize(p);
+    for (final f in imageFiles) {
+      await _assertFileSize(f);
     }
     final t = await getToken();
     final rq =
@@ -1066,8 +1073,8 @@ class Api {
     rq.fields['metadata'] = jsonEncode(metadata);
     if (latitude != null) rq.fields['latitude'] = latitude.toString();
     if (longitude != null) rq.fields['longitude'] = longitude.toString();
-    for (final p in imagePaths) {
-      rq.files.add(await http.MultipartFile.fromPath('images', p));
+    for (final f in imageFiles) {
+      rq.files.add(await _partFromFile('images', f));
     }
     final rs = await rq.send().timeout(_timeout);
     final body = await rs.stream.bytesToString();

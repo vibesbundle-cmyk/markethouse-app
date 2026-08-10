@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -7,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/safe_file.dart';
 import '../widgets/bits.dart' show CountryCodePhoneField, splitPhoneForEditing;
 import '../widgets/location_picker.dart';
 import '../widgets/location_map.dart';
@@ -267,7 +269,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
 
   Future<void> _detectAspectRatio(String path) async {
     try {
-      final bytes = await File(path).readAsBytes();
+      final bytes = await XFile(path).readAsBytes();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       final ratio = frame.image.width / frame.image.height;
@@ -287,6 +289,15 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
     }
     setState(() => _flattening = true);
     try {
+      // On web we can't write temp files to disk; keep the original picked
+      // image as-is (the photo still posts, just without the on-canvas edits).
+      if (kIsWeb) {
+        setState(() {
+          _flattening = false;
+          _step = _PostStep.caption;
+        });
+        return;
+      }
       final boundary = _editPreviewKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
       if (boundary != null) {
@@ -326,9 +337,9 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
     if (_croppedPath == null && _multiFiles.isEmpty) return;
     final ap = context.read<AppState>();
     final isBusiness = ap.user?.isBusiness ?? false;
-    final paths = _multiFiles.isNotEmpty
-        ? _multiFiles.map((f) => f.path).toList()
-        : [_croppedPath!];
+    final files = _multiFiles.isNotEmpty
+        ? _multiFiles
+        : <XFile>[XFile(_croppedPath!, name: _picked?.name ?? 'upload.png')];
 
     if (isBusiness) {
       final name = _productNameCtl.text.trim();
@@ -352,7 +363,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
               ? '0'
               : (int.tryParse(_stockCtl.text.trim()) ?? 0).toString(),
           'is_unlimited_stock': _unlimitedStock.toString(),
-        }, paths);
+        }, files);
         if (!mounted) return;
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -375,10 +386,10 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
     setState(() => _posting = true);
     try {
       if (_multiFiles.isNotEmpty) {
-        await Api.createPostMulti(_captionCtl.text.trim(), paths,
+        await Api.createPostMulti(_captionCtl.text.trim(), files,
             taggedUserIds: _taggedUsers.map((u) => u.id).toList());
       } else {
-        await Api.createPost(_captionCtl.text.trim(), _croppedPath,
+        await Api.createPost(_captionCtl.text.trim(), files.first,
             taggedUserIds: _taggedUsers.map((u) => u.id).toList());
       }
       if (!mounted) return;
@@ -604,7 +615,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                               1,
                               0
                             ]),
-                  child: Image.file(File(_picked!.path), fit: BoxFit.cover),
+                  child: fileImage(_picked!.path, fit: BoxFit.cover),
                 ),
                 if (_strokes.isNotEmpty || _currentStroke != null)
                   CustomPaint(
@@ -733,7 +744,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                               ])
                             : ColorFilter.matrix(_filterMatrices[i]!),
                         child:
-                            Image.file(File(_picked!.path), fit: BoxFit.cover),
+                            fileImage(_picked!.path, fit: BoxFit.cover),
                       ),
               ),
               const SizedBox(height: 4),
@@ -868,7 +879,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                         color: dk ? C.surf2D : C.surfL,
                         child: const Icon(Icons.videocam_rounded,
                             color: C.green, size: 28))
-                    : Image.file(File(f.path),
+                    : fileImage(f.path,
                         width: 76, height: 76, fit: BoxFit.cover),
               ),
               Positioned(
@@ -904,7 +915,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                       color: dk ? C.surf2D : C.surfL,
                       child: const Icon(Icons.videocam_rounded,
                           color: C.green, size: 28))
-                  : Image.file(File(_multiFiles.first.path),
+                  : fileImage(_multiFiles.first.path,
                       width: 76, height: 76, fit: BoxFit.cover),
               if (_multiFiles.length > 1)
                 Positioned(
@@ -932,7 +943,7 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                   child:
                       const Icon(Icons.videocam_rounded, color: C.green, size: 28))
               : (_croppedPath != null
-                  ? Image.file(File(_croppedPath!),
+                  ? fileImage(_croppedPath!,
                       width: 76, height: 76, fit: BoxFit.cover)
                   : Container(
                       width: 76, height: 76, color: dk ? C.surf2D : C.surfL)),
@@ -2087,9 +2098,12 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
         WebUiSettings(context: context),
       ]);
       if (croppedFile == null || !mounted) return;
+      final croppedBytes = await croppedFile.readAsBytes();
+      final croppedX = XFile.fromData(croppedBytes,
+          name: 'cropped.jpg', mimeType: 'image/jpeg');
       final String? url = isHeader
-          ? await Api.uploadHeaderPhoto(croppedFile.path)
-          : await Api.uploadProfilePhoto(croppedFile.path);
+          ? await Api.uploadHeaderPhoto(croppedX)
+          : await Api.uploadProfilePhoto(croppedX);
       if (!mounted) return;
       final updated = await Api.getProfile();
       if (!mounted) return;

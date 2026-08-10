@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -6,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../services/api.dart';
+import '../services/safe_file.dart';
 import '../services/location_service.dart';
 import '../widgets/bits.dart';
 import '../widgets/location_picker.dart';
@@ -257,7 +257,7 @@ class _SupplyPageState extends State<SupplyPage> {
   double? _lat, _lng;
   bool _locating = false;
 
-  final List<String> _imagePaths = [];
+  final List<XFile> _imageFiles = [];
   final _picker = ImagePicker();
 
   Future<void> _applyPoint(ll.LatLng p, {bool fromGps = false}) async {
@@ -309,17 +309,17 @@ class _SupplyPageState extends State<SupplyPage> {
       ));
 
   Future<void> _pickImage() async {
-    if (_imagePaths.length >= 5) { _snack('Maximum 5 images', err: true); return; }
+    if (_imageFiles.length >= 5) { _snack('Maximum 5 images', err: true); return; }
     try {
       final f = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1200);
       if (f == null) return;
-      setState(() => _imagePaths.add(f.path));
+      setState(() => _imageFiles.add(f));
     } catch (e) { _snack('Could not pick image: $e', err: true); }
   }
 
   Future<void> _submit() async {
     if (!_form.currentState!.validate()) return;
-    if (_imagePaths.isEmpty) { _snack('Please add at least 1 photo', err: true); return; }
+    if (_imageFiles.isEmpty) { _snack('Please add at least 1 photo', err: true); return; }
     setState(() => _busy = true);
     try {
       final fields = {
@@ -333,7 +333,7 @@ class _SupplyPageState extends State<SupplyPage> {
         'contact_number': _contact.text.trim(), 'whatsapp_number': _whatsapp.text.trim(),
         'latitude': (_lat ?? 0).toString(), 'longitude': (_lng ?? 0).toString(),
       };
-      final res = await Api.createSupply(fields, _imagePaths);
+      final res = await Api.createSupply(fields, _imageFiles);
       if (res['error'] != null) {
         _snack(res['error'] as String, err: true);
       } else {
@@ -367,12 +367,12 @@ class _SupplyPageState extends State<SupplyPage> {
             Slide(delay: 20, child: SizedBox(
               height: 100,
               child: ListView(scrollDirection: Axis.horizontal, children: [
-                ..._imagePaths.asMap().entries.map((e) => _ImgThumb(
-                  path: e.value,
-                  onRemove: () => setState(() => _imagePaths.removeAt(e.key)),
+                ..._imageFiles.asMap().entries.map((e) => _ImgThumb(
+                  file: e.value,
+                  onRemove: () => setState(() => _imageFiles.removeAt(e.key)),
                   dk: dk,
                 )),
-                if (_imagePaths.length < 5)
+                if (_imageFiles.length < 5)
                   GestureDetector(
                     onTap: _pickImage,
                     child: AnimatedContainer(
@@ -650,10 +650,10 @@ class _Badge extends StatelessWidget {
 }
 
 class _ImgThumb extends StatelessWidget {
-  final String path;
+  final XFile file;
   final VoidCallback onRemove;
   final bool dk;
-  const _ImgThumb({required this.path, required this.onRemove, required this.dk});
+  const _ImgThumb({required this.file, required this.onRemove, required this.dk});
   @override
   Widget build(BuildContext context) => Stack(children: [
     Container(
@@ -662,7 +662,7 @@ class _ImgThumb extends StatelessWidget {
       decoration: BoxDecoration(color: dk ? C.surf2D : C.surf2L, borderRadius: BorderRadius.circular(12)),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: Image.file(File(path), fit: BoxFit.cover,
+        child: fileImage(file.path, fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.image_rounded, color: C.green, size: 32))),
       ),
     ),

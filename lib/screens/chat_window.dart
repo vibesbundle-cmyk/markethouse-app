@@ -223,7 +223,7 @@ class _ChatWindowState extends State<ChatWindow> {
     if (file == null || !mounted) return;
     setState(() => _sending = true);
     try {
-      final url = await Api.uploadChatMedia(file.path, type);
+        final url = await Api.uploadChatMedia(file, type);
       if (url == null) {
         _snack('Upload failed');
         setState(() => _sending = false);
@@ -281,7 +281,7 @@ class _ChatWindowState extends State<ChatWindow> {
           ? 'video'
           : 'image';
       try {
-        final url = await Api.uploadChatMedia(file.path, type);
+      final url = await Api.uploadChatMedia(file, type);
         if (url == null) continue;
         final realId = await ChatProvider.instance
             .sendMessage(

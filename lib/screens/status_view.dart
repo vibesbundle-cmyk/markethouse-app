@@ -116,7 +116,7 @@ class _StatusBarState extends State<StatusBar> {
           ? 'video'
           : 'image';
       try {
-        final mediaUrl = await Api.uploadMedia(file.path, 'status', type);
+        final mediaUrl = await Api.uploadMedia(file, 'status', type);
         await Api.createStatus(type: type, mediaUrl: mediaUrl, textContent: null);
       } catch (_) {
         // Keep going so one failed file doesn't block the rest of the batch.
@@ -132,7 +132,7 @@ class _StatusBarState extends State<StatusBar> {
         : await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
     if (file == null || !mounted) return;
     try {
-      final mediaUrl = await Api.uploadMedia(file.path, 'status', type);
+      final mediaUrl = await Api.uploadMedia(file, 'status', type);
       await Api.createStatus(type: type, mediaUrl: mediaUrl, textContent: null);
       if (mounted) _load();
     } catch (e) {

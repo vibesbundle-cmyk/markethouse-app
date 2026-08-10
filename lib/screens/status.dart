@@ -72,7 +72,7 @@ class _StatusBarState extends State<StatusBar> {
         : await picker.pickVideo(source: ImageSource.gallery);
     if (file == null || !mounted) return;
     try {
-      final uploadedUrl = await Api.uploadMedia(file.path, 'status', choice);
+      final uploadedUrl = await Api.uploadMedia(file, 'status', choice);
       await Api.createStatus(type: choice, mediaUrl: uploadedUrl);
       _load();
     } catch (_) {}

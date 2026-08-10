@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -12,6 +11,7 @@ import 'chat_window.dart';
 import '../models/chat.dart';
 import '../theme/state.dart';
 import '../services/api.dart';
+import '../services/safe_file.dart';
 import '../services/location_service.dart';
 
 // ── Sort options ──────────────────────────────────────────────────────────────
@@ -280,7 +280,7 @@ class _CommerceState extends State<Commerce> with SingleTickerProviderStateMixin
                 const SizedBox(height: 16),
                 SizedBox(height: 84, child: ListView(scrollDirection: Axis.horizontal, children: [
                   ...images.map((f) => Padding(padding: const EdgeInsets.only(right: 8), child: Stack(clipBehavior: Clip.none, children: [
-                    ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.file(File(f.path), width: 76, height: 76, fit: BoxFit.cover)),
+                    ClipRRect(borderRadius: BorderRadius.circular(10), child: fileImage(f.path, width: 76, height: 76, fit: BoxFit.cover)),
                     Positioned(top: -6, right: -6, child: GestureDetector(
                       onTap: () => ss(() => images.remove(f)),
                       child: Container(width: 20, height: 20, decoration: const BoxDecoration(color: Colors.black87, shape: BoxShape.circle),
@@ -422,7 +422,7 @@ class _CommerceState extends State<Commerce> with SingleTickerProviderStateMixin
                         deliveryAvailable: delivery,
                         location: locationCtl.text.trim(),
                         metadata: metadata,
-                        imagePaths: images.map((f) => f.path).toList(),
+                        imageFiles: images,
                         latitude: lat,
                         longitude: lng,
                       );

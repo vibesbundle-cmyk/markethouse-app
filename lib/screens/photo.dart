@@ -18,7 +18,7 @@ class Photo extends StatefulWidget {
 class _PhotoState extends State<Photo> {
   bool _picked = false;
   bool _busy = false;
-  String? _path;
+  XFile? _file;
 
   Future<void> _pick() async {
     final img = await ImagePicker()
@@ -26,18 +26,18 @@ class _PhotoState extends State<Photo> {
     if (img != null) {
       setState(() {
         _picked = true;
-        _path = img.path;
+        _file = img;
       });
     }
   }
 
   Future<void> _upload() async {
-    if (_path == null) {
+    if (_file == null) {
       _next();
       return;
     }
     setState(() => _busy = true);
-    final url = await Api.uploadProfilePhoto(_path!);
+    final url = await Api.uploadProfilePhoto(_file!);
     if (url != null && mounted) {
       context.read<AppState>().setAvatar(url);
     }

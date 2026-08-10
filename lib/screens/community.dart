@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +5,7 @@ import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../theme/state.dart';
 import '../services/api.dart';
+import '../services/safe_file.dart';
 import '../widgets/bits.dart';
 import 'community_chat.dart';
 
@@ -283,7 +283,7 @@ class _CommunityScreenState extends State<CommunityScreen>
                               color: dk ? C.surf2D : const Color(0xFFF2F2F7),
                               image: bannerFile != null
                                   ? DecorationImage(
-                                      image: FileImage(File(bannerFile!.path)),
+                                      image: fileImageProvider(bannerFile!.path),
                                       fit: BoxFit.cover,
                                     )
                                   : null,
@@ -329,7 +329,7 @@ class _CommunityScreenState extends State<CommunityScreen>
                                   image: iconFile != null
                                       ? DecorationImage(
                                           image:
-                                              FileImage(File(iconFile!.path)),
+                                                    fileImageProvider(iconFile!.path),
                                           fit: BoxFit.cover,
                                         )
                                       : null,
@@ -648,14 +648,14 @@ class _CommunityScreenState extends State<CommunityScreen>
                                     String iconUrl = '', bannerUrl = '';
                                     if (iconFile != null) {
                                       iconUrl = await Api.uploadMedia(
-                                              iconFile!.path,
+                                              iconFile!,
                                               'community',
                                               'image') ??
                                           '';
                                     }
                                     if (bannerFile != null) {
                                       bannerUrl = await Api.uploadMedia(
-                                              bannerFile!.path,
+                                              bannerFile!,
                                               'community',
                                               'image') ??
                                           '';
@@ -1171,7 +1171,7 @@ class _CommunityDetailState extends State<CommunityDetailScreen>
         backgroundColor: C.green,
         behavior: SnackBarBehavior.floating));
     try {
-      final url = await Api.uploadMedia(file.path, 'community', 'image');
+      final url = await Api.uploadMedia(file, 'community', 'image');
       if (url == null) throw ApiException('Upload failed');
       await Api.updateCommunityPhotos(id,
           icon: isCover ? '' : url, coverPhoto: isCover ? url : '');
@@ -1819,8 +1819,8 @@ class _CommunityDetailState extends State<CommunityDetailScreen>
                                         : ClipRRect(
                                             borderRadius:
                                                 BorderRadius.circular(12),
-                                            child: Image.file(
-                                                File(mediaFile!.path),
+                                            child: fileImage(
+                                                mediaFile!.path,
                                                 fit: BoxFit.cover,
                                                 width: double.infinity,
                                                 height: 140))),
@@ -1879,7 +1879,7 @@ class _CommunityDetailState extends State<CommunityDetailScreen>
                                           String mediaUrl = '';
                                           if (mediaFile != null) {
                                             mediaUrl = await Api.uploadMedia(
-                                                    mediaFile!.path,
+                                                    mediaFile!,
                                                     'community',
                                                     postType) ??
                                                 '';
@@ -2306,7 +2306,7 @@ class _SellItemSheetState extends State<_SellItemSheet> {
     if (file == null) return;
     setState(() => _busy = true);
     try {
-      final url = await Api.uploadMedia(file.path, 'community', 'image');
+      final url = await Api.uploadMedia(file, 'community', 'image');
       if (mounted && url != null) setState(() => _imageUrl = url);
     } catch (_) {} finally {
       if (mounted) setState(() => _busy = false);

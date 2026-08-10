@@ -120,7 +120,7 @@ class _CommunityChatScreenState extends State<CommunityChatScreen> {
     if (file == null || !mounted) return;
     setState(() => _sending = true);
     try {
-      final url = await Api.uploadMedia(file.path, 'community', type);
+      final url = await Api.uploadMedia(file, 'community', type);
       if (url == null) throw ApiException('Upload failed');
       await _send(mediaUrl: url, mediaType: type);
     } catch (e) {
