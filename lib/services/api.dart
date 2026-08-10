@@ -15,7 +15,7 @@ class Api {
 
   static String get baseUrl => _base;
 
-  static const _timeout = Duration(seconds: 15);
+  static const _timeout = Duration(seconds: 120);
   static const int _maxUploadBytes = 50 * 1024 * 1024; // 50 MB
 
   // ── Tokens ───────────────────────────────────────────────────────────────
@@ -148,6 +148,8 @@ class Api {
           .timeout(_timeout);
     } on SocketException {
       throw ApiException('No internet connection.');
+    } on http.ClientException {
+      throw ApiException('No internet connection.');
     } on TimeoutException {
       throw ApiException('Request timed out.');
     }
@@ -167,6 +169,8 @@ class Api {
     try {
       r = await http.get(uri, headers: headers).timeout(_timeout);
     } on SocketException {
+      throw ApiException('No internet connection.');
+    } on http.ClientException {
       throw ApiException('No internet connection.');
     } on TimeoutException {
       throw ApiException('Request timed out.');
@@ -191,6 +195,8 @@ class Api {
           .timeout(_timeout);
     } on SocketException {
       throw ApiException('No internet connection.');
+    } on http.ClientException {
+      throw ApiException('No internet connection.');
     } on TimeoutException {
       throw ApiException('Request timed out.');
     }
@@ -210,6 +216,8 @@ class Api {
     try {
       r = await http.delete(uri, headers: headers).timeout(_timeout);
     } on SocketException {
+      throw ApiException('No internet connection.');
+    } on http.ClientException {
       throw ApiException('No internet connection.');
     } on TimeoutException {
       throw ApiException('Request timed out.');
@@ -1165,23 +1173,28 @@ class Api {
           String icon = '',
           String coverPhoto = '',
           bool marketplaceEnabled = false,
-          List<int> invitedUserIds = const []}) async =>
-      _post('/community',
-          body: {
-            'name': name,
-            'slug': slug,
-            'username': username,
-            'description': description,
-            'visibility': visibility,
-            'rules': rules,
-            'category': category,
-            'tags': tags,
-            'icon': icon,
-            'cover_photo': coverPhoto,
-            'marketplace_enabled': marketplaceEnabled,
-            if (invitedUserIds.isNotEmpty) 'invited_user_ids': invitedUserIds,
-          },
-          auth: true);
+          List<int> invitedUserIds = const []}) async {
+    final r = await _post('/community',
+        body: {
+          'name': name,
+          'slug': slug,
+          'username': username,
+          'description': description,
+          'visibility': visibility,
+          'rules': rules,
+          'category': category,
+          'tags': tags,
+          'icon': icon,
+          'cover_photo': coverPhoto,
+          'marketplace_enabled': marketplaceEnabled,
+          if (invitedUserIds.isNotEmpty) 'invited_user_ids': invitedUserIds,
+        },
+        auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not create community (${r.statusCode})');
+    }
+  }
 
   static Future<Map<String, dynamic>?> getCommunityById(int id) async {
     final r = await _get('/community/id/$id', auth: true);
@@ -1191,16 +1204,31 @@ class Api {
     return null;
   }
 
-  static Future<void> joinCommunityById(int id) async =>
-      _post('/community/$id/join', auth: true);
+  static Future<void> joinCommunityById(int id) async {
+    final r = await _post('/community/$id/join', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not join community (${r.statusCode})');
+    }
+  }
 
-  static Future<void> leaveCommunity(int id) async =>
-      _delete('/community/$id/leave', auth: true);
+  static Future<void> leaveCommunity(int id) async {
+    final r = await _delete('/community/$id/leave', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not leave community (${r.statusCode})');
+    }
+  }
 
   /// Permanently deletes a community. Backend enforces owner-only — this
   /// just surfaces whatever error it returns (e.g. 403 if not the owner).
-  static Future<void> deleteCommunity(int id) async =>
-      _delete('/community/$id', auth: true);
+  static Future<void> deleteCommunity(int id) async {
+    final r = await _delete('/community/$id', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not delete community (${r.statusCode})');
+    }
+  }
 
   static Future<List<dynamic>> getCommunityPostsFull(int id,
       {String sort = 'hot'}) async {
@@ -1234,8 +1262,12 @@ class Api {
 
   static Future<void> updateCommunityPhotos(int communityId,
       {String icon = '', String coverPhoto = ''}) async {
-    await _put('/community/$communityId/settings',
+    final r = await _put('/community/$communityId/settings',
         body: {'icon': icon, 'cover_photo': coverPhoto}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not update community photos (${r.statusCode})');
+    }
   }
 
   // ── Community marketplace ─────────────────────────────────────────────────
@@ -1262,14 +1294,28 @@ class Api {
           'images': images,
         },
         auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not create listing (${r.statusCode})');
+    }
     return _decode(r);
   }
 
-  static Future<void> deleteCommunityListing(int listingId) async =>
-      _delete('/community/listing/$listingId', auth: true);
+  static Future<void> deleteCommunityListing(int listingId) async {
+    final r = await _delete('/community/listing/$listingId', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not delete listing (${r.statusCode})');
+    }
+  }
 
-  static Future<void> markCommunityListingSold(int listingId) async =>
-      _post('/community/listing/$listingId/sold', auth: true);
+  static Future<void> markCommunityListingSold(int listingId) async {
+    final r = await _post('/community/listing/$listingId/sold', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not mark listing sold (${r.statusCode})');
+    }
+  }
 
   // ── Supply & Demand (thrift marketplace) ──────────────────────────────────
   // NOTE: checkout/payment/escrow deliberately isn't wired here yet — this
@@ -1326,20 +1372,25 @@ class Api {
           List<String> pollOptions = const [],
           int pollDurationHours = 24,
           bool pollMultiple = false,
-          bool pollAnonymous = false}) async =>
-      _post('/community/$communityId/post',
-          body: {
-            'title': title,
-            'body': body,
-            'post_type': postType,
-            'media_url': mediaUrl,
-            'link_url': linkUrl,
-            if (postType == 'poll') 'poll_options': pollOptions,
-            if (postType == 'poll') 'poll_duration_hours': pollDurationHours,
-            if (postType == 'poll') 'poll_multiple': pollMultiple,
-            if (postType == 'poll') 'poll_anonymous': pollAnonymous,
-          },
-          auth: true);
+          bool pollAnonymous = false}) async {
+    final r = await _post('/community/$communityId/post',
+        body: {
+          'title': title,
+          'body': body,
+          'post_type': postType,
+          'media_url': mediaUrl,
+          'link_url': linkUrl,
+          if (postType == 'poll') 'poll_options': pollOptions,
+          if (postType == 'poll') 'poll_duration_hours': pollDurationHours,
+          if (postType == 'poll') 'poll_multiple': pollMultiple,
+          if (postType == 'poll') 'poll_anonymous': pollAnonymous,
+        },
+        auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not post to community (${r.statusCode})');
+    }
+  }
 
   static Future<void> voteCommunityPostById(int postId, int vote) async =>
       _post('/community/post/$postId/vote', body: {'vote': vote}, auth: true);

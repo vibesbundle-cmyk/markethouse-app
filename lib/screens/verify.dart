@@ -54,23 +54,27 @@ class _VerifyState extends State<Verify> {
         .replaceAll(RegExp(r'[^a-z0-9_]'), '');
     _suggestedUsername = username;
 
-    final res = await Api.signup(
-      email: widget.email,
-      password: widget.password,
-      fullName: widget.name,
-      username: username,
-      dob: widget.dob,
-      gender: widget.gender,
-      accountType: widget.accountType,
-      businessType: widget.businessType,
-    );
+    try {
+      final res = await Api.signup(
+        email: widget.email,
+        password: widget.password,
+        fullName: widget.name,
+        username: username,
+        dob: widget.dob,
+        gender: widget.gender,
+        accountType: widget.accountType,
+        businessType: widget.businessType,
+      );
 
-    if (res['error'] != null) {
+      if (res['error'] != null) {
+        if (!mounted) return;
+        _snack(res['error'], C.err);
+      }
+    } catch (e) {
+      // e.g. "No internet connection." or "Request timed out." — surface it
+      // instead of crashing, and stay on the page so the user can retry.
       if (!mounted) return;
-      _snack(res['error'], C.err);
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) Navigator.pop(context);
-      });
+      _snack('$e', C.err);
     }
   }
 
@@ -281,10 +285,16 @@ class _VerifyState extends State<Verify> {
                 delay: 400,
                 child: GestureDetector(
                   onTap: _sec == 0
-                      ? () {
-                          _otp.clear();
+                      ? () async {
                           _startTimer();
-                          Api.resendEmail(widget.email);
+                          try {
+                            await Api.resendEmail(widget.email);
+                            if (!mounted) return;
+                            _snack('New code sent to ${widget.email}', C.green);
+                          } catch (e) {
+                            if (!mounted) return;
+                            _snack('$e', C.err);
+                          }
                         }
                       : null,
                   child: _sec == 0

@@ -79,12 +79,27 @@ class _LoginState extends State<Login> {
         Navigator.pushAndRemoveUntil(context,
             MaterialPageRoute(builder: (_) => const Shell()), (_) => false);
       } else {
-        _err(data['error'] ?? 'Login failed');
+        final err = data['error'] ?? 'Login failed';
+        if (err.toString().contains('not verified')) {
+          _err('Account not verified. Check your inbox for the code, or use "Resend code".');
+          await _resendCode();
+        } else {
+          _err(err as String);
+        }
       }
     } catch (e) {
       _err('Network error. Check your connection.');
     }
     if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _resendCode() async {
+    final id = _id.text.trim();
+    if (!id.contains('@')) return;
+    try {
+      await Api.resendEmail(id);
+      if (mounted) _err('A new verification code was sent to $id');
+    } catch (_) {}
   }
 
   void _err(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
