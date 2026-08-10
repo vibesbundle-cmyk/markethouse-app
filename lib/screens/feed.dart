@@ -6,6 +6,7 @@ import '../theme/dark.dart';
 import '../services/api.dart';
 import '../services/location_service.dart';
 import '../widgets/post_feed_card.dart';
+import 'profile.dart' show showPostCreator;
 import 'search.dart';
 
 // ── Post categories for tagging + filtering ──────────────────────────────────
@@ -19,10 +20,10 @@ const kPostCategories = [
 class Feed extends StatefulWidget {
   const Feed({super.key});
   @override
-  State<Feed> createState() => _FeedState();
+  State<Feed> createState() => FeedState();
 }
 
-class _FeedState extends State<Feed> with TickerProviderStateMixin {
+class FeedState extends State<Feed> with TickerProviderStateMixin {
   late TabController _tab;
   final _lists = <String, List>{
     'following': [], 'for_you': [], 'trending': [], 'nearby': [],
@@ -34,20 +35,23 @@ class _FeedState extends State<Feed> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _tab = TabController(length: 4, vsync: this);
-    _tab.addListener(() { if (!_tab.indexIsChanging) _ensureLoaded(_tabKey); });
+    // Always re-fetch the tab you switch to so new posts show up instead of
+    // serving a stale list that never updates until pull-to-refresh.
+    _tab.addListener(() {
+      if (!_tab.indexIsChanging) _load(_tabKey);
+    });
     _load('for_you');   // start with For You (most engaging)
     _load('following'); // also pre-load Following
   }
+
+  /// Refetch whatever tab is currently visible (called from the shell when the
+  /// Home tab is tapped again, so a post made from Profile shows up here).
+  Future<void> reload() => _load(_tabKey);
 
   @override
   void dispose() { _tab.dispose(); super.dispose(); }
 
   String get _tabKey => ['following', 'for_you', 'trending', 'nearby'][_tab.index];
-
-  Future<void> _ensureLoaded(String key) async {
-    if ((_lists[key]!.isNotEmpty || _loading[key] == false)) return;
-    _load(key);
-  }
 
   bool _nearbyNoLocation = false;
 
@@ -106,6 +110,11 @@ class _FeedState extends State<Feed> with TickerProviderStateMixin {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 26),
+            tooltip: 'Create post',
+            onPressed: () => showPostCreator(context),
+          ),
           IconButton(
             icon: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GlobalSearchScreen())),

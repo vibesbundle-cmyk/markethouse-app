@@ -27,6 +27,21 @@ import 'notifications.dart';
 import 'settings.dart';
 import 'post_swipe_viewer.dart';
 
+/// Opens the shared photo-post creator (used from the Profile FAB and the
+/// Home feed toolbar so both entry points match exactly).
+void showPostCreator(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => ConstrainedBox(
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+      child: const _PostCreatorSheet(),
+    ),
+  );
+}
+
 // ── Slim user model ──────────────────────────────────────────────────────────
 class _SlimUser {
   final int id;
@@ -2177,18 +2192,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                     userId: userId, showFollowers: showFollowers))));
   }
 
-  void _showPostCreator() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ConstrainedBox(
-        constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
-        child: const _PostCreatorSheet(),
-      ),
-    );
-  }
+  void _showPostCreator() => showPostCreator(context);
 
   @override
   Widget build(BuildContext context) {
@@ -3305,11 +3309,27 @@ class _HeaderBox extends StatelessWidget {
             borderRadius: const BorderRadius.only(
                 bottomLeft: Radius.circular(24),
                 bottomRight: Radius.circular(24)),
-            child: hasPhoto
-                ? Image.network(Api.resolveUrl(headerPhoto!),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox())
-                : null));
+            child: Stack(children: [
+              if (hasPhoto)
+                Positioned.fill(
+                    child: Image.network(Api.resolveUrl(headerPhoto!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox())),
+              Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: GestureDetector(
+                      onTap: onPickImage,
+                      child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                              color: C.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2)),
+                          child: const Icon(Icons.camera_alt_rounded,
+                              color: Colors.white, size: 15)))),
+            ])));
   }
 }
 

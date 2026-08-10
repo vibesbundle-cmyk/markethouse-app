@@ -18,6 +18,7 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int _i = 0;
+  final _feedKey = GlobalKey<FeedState>();
 
   @override
   void initState() {
@@ -31,7 +32,10 @@ class _ShellState extends State<Shell> {
     });
   }
 
-  void _tap(int i) => setState(() => _i = i);
+  void _tap(int i) {
+    if (i == 0) _feedKey.currentState?.reload(); // fresh Home on every tap
+    setState(() => _i = i);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,12 +45,12 @@ class _ShellState extends State<Shell> {
       child: Scaffold(
         body: IndexedStack(
           index: _i,
-          children: const [
-            Feed(),
-            Commerce(),
-            CommunityScreen(),
-            ChatList(),
-            Profile(),
+          children: [
+            Feed(key: _feedKey),
+            const Commerce(),
+            const CommunityScreen(),
+            const ChatList(),
+            const Profile(),
           ],
         ),
         bottomNavigationBar: Container(
