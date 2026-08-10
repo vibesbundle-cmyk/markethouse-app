@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'app_storage.dart';
 import '../models/user.dart';
 
 class Api {
@@ -14,21 +14,17 @@ class Api {
 
   static String get baseUrl => _base;
 
-  static const _store = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
-
   static const _timeout = Duration(seconds: 15);
   static const int _maxUploadBytes = 50 * 1024 * 1024; // 50 MB
 
   // ── Tokens ───────────────────────────────────────────────────────────────
-  static Future<String?> getToken() => _store.read(key: 'jwt');
-  static Future<void> saveToken(String t) => _store.write(key: 'jwt', value: t);
+  static Future<String?> getToken() => AppStorage.read(key: 'jwt');
+  static Future<void> saveToken(String t) => AppStorage.write(key: 'jwt', value: t);
   static Future<void> saveRefresh(String t) =>
-      _store.write(key: 'refresh', value: t);
+      AppStorage.write(key: 'refresh', value: t);
   static Future<void> clearTokens() async {
-    await _store.delete(key: 'jwt');
-    await _store.delete(key: 'refresh');
+    await AppStorage.delete(key: 'jwt');
+    await AppStorage.delete(key: 'refresh');
   }
 
   // ── Multi-account switching ─────────────────────────────────────────────
@@ -39,7 +35,7 @@ class Api {
   static const _accountsKey = 'saved_accounts';
 
   static Future<List<Map<String, dynamic>>> savedAccounts() async {
-    final raw = await _store.read(key: _accountsKey);
+    final raw = await AppStorage.read(key: _accountsKey);
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw) as List;
@@ -51,7 +47,7 @@ class Api {
 
   static Future<void> _writeSavedAccounts(
       List<Map<String, dynamic>> accounts) async {
-    await _store.write(key: _accountsKey, value: jsonEncode(accounts));
+    await AppStorage.write(key: _accountsKey, value: jsonEncode(accounts));
   }
 
   /// Snapshots the current session's tokens against the given user, so it
@@ -66,7 +62,7 @@ class Api {
   }) async {
     final jwt = await getToken();
     if (jwt == null) return;
-    final refresh = await _store.read(key: 'refresh');
+    final refresh = await AppStorage.read(key: 'refresh');
     final accounts = await savedAccounts();
     accounts.removeWhere((a) => a['user_id'] == userId);
     accounts.add({
@@ -96,12 +92,12 @@ class Api {
     } else {
       // Never leave the previous account's refresh token attached — that
       // would silently log you back into the wrong account on the next 401.
-      await _store.delete(key: 'refresh');
+      await AppStorage.delete(key: 'refresh');
     }
     // The cached profile belongs to the previous user. If the restored token
     // is rejected, getProfile() would otherwise fall back to it and the app
     // would look like the switch never happened.
-    await _store.delete(key: _profileCacheKey);
+    await AppStorage.delete(key: _profileCacheKey);
     return true;
   }
 
@@ -118,7 +114,7 @@ class Api {
   static Future<void> updateSavedAccountTokens(int userId) async {
     final jwt = await getToken();
     if (jwt == null) return;
-    final refresh = await _store.read(key: 'refresh');
+    final refresh = await AppStorage.read(key: 'refresh');
     final accounts = await savedAccounts();
     final idx = accounts.indexWhere((a) => a['user_id'] == userId);
     if (idx < 0) return;
@@ -271,7 +267,7 @@ class Api {
   }
 
   static Future<bool> refresh() async {
-    final rt = await _store.read(key: 'refresh');
+    final rt = await AppStorage.read(key: 'refresh');
     if (rt == null) return false;
     try {
       final r = await http
@@ -340,7 +336,7 @@ class Api {
       if (r.statusCode == 200) {
         final user = User.fromJson(_decode(r)['user'] as Map<String, dynamic>);
         // Cache the profile so it's available offline.
-        await _store.write(
+        await AppStorage.write(
             key: _profileCacheKey, value: jsonEncode(_decode(r)['user']));
         return user;
       }
@@ -353,7 +349,7 @@ class Api {
     } on TimeoutException {
       // Fall back to cache.
     }
-    final cached = await _store.read(key: _profileCacheKey);
+    final cached = await AppStorage.read(key: _profileCacheKey);
     if (cached != null) {
       try {
         return User.fromJson(jsonDecode(cached) as Map<String, dynamic>);
