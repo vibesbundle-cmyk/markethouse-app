@@ -8,7 +8,11 @@ class WsService {
   factory WsService() => _instance;
   WsService._();
 
+  static const Duration _retryDelay = Duration(seconds: 3);
+
   WebSocketChannel? _channel;
+  Timer? _retryTimer;
+  bool _closed = false;
   final StreamController<Map<String, dynamic>> _controller =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -24,8 +28,9 @@ class WsService {
       final token = await Api.getToken();
       if (token == null) return;
       final uri = Uri.parse('$wsBase/ws?token=$token');
-      _channel = WebSocketChannel.connect(uri);
-      _channel!.stream.listen(
+      final channel = WebSocketChannel.connect(uri);
+      _channel = channel;
+      channel.stream.listen(
         (data) {
           try {
             final json = jsonDecode(data as String) as Map<String, dynamic>;
@@ -33,18 +38,43 @@ class WsService {
           } catch (_) {}
         },
         onDone: () {
-          _channel = null;
+          if (identical(_channel, channel)) {
+            _channel = null;
+            _scheduleRetry();
+          }
         },
         onError: (_) {
-          _channel = null;
+          if (identical(_channel, channel)) {
+            _channel = null;
+            _scheduleRetry();
+          }
         },
       );
-    } catch (_) {}
+    } catch (_) {
+      _channel = null;
+      _scheduleRetry();
+    }
+  }
+
+  void _scheduleRetry() {
+    if (_closed) return;
+    _retryTimer ??= Timer(_retryDelay, () {
+      _retryTimer = null;
+      connect();
+    });
   }
 
   void disconnect() {
+    _closed = true;
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _channel?.sink.close();
     _channel = null;
+  }
+
+  /// Re-allow reconnects (call after a successful login/logout cycle).
+  void reset() {
+    _closed = false;
   }
 
   /// Push a JSON frame up the socket. Used for ephemeral events that

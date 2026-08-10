@@ -19,6 +19,7 @@ import '../theme/state.dart';
 import '../models/user.dart';
 import '../services/api.dart';
 import '../utils/image_crop_utils.dart';
+import '../utils/crop_screen.dart';
 import 'public.dart';
 import 'demand.dart';
 import 'shop.dart';
@@ -29,8 +30,8 @@ import 'post_swipe_viewer.dart';
 
 /// Opens the shared photo-post creator (used from the Profile FAB and the
 /// Home feed toolbar so both entry points match exactly).
-void showPostCreator(BuildContext context) {
-  showModalBottomSheet(
+Future<void> showPostCreator(BuildContext context) async {
+  await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
@@ -338,6 +339,28 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
 
   Future<void> _recrop() async {
     if (_picked == null) return;
+    if (kIsWeb) {
+      // image_cropper's web UI is broken (no working Done button) — use the
+      // custom crop screen. The result is a blob: URL, which fileImage and
+      // XFile.readAsBytes both handle on web.
+      final bytes = await _picked!.readAsBytes();
+      if (!mounted) return;
+      final croppedBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          builder: (_) => CropScreen(
+            bytes: bytes,
+            shape: CropShape.rect,
+            aspectRatio: _imageAspectRatio,
+          ),
+        ),
+      );
+      if (croppedBytes == null || !mounted) return;
+      final x = XFile.fromData(croppedBytes,
+          name: 'cropped.png', mimeType: 'image/png');
+      setState(() => _croppedPath = x.path);
+      _detectAspectRatio(x.path);
+      return;
+    }
     final dk = context.read<DarkProvider>().isDark;
     final cropped = await ImageCropper().cropImage(
       sourcePath: _picked!.path,
@@ -2063,59 +2086,78 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
           maxWidth: isHeader ? 1440 : 900,
           maxHeight: isHeader ? 810 : 900);
       if (picked == null || !mounted) return;
-      final dk = context.read<DarkProvider>().isDark;
-      final croppedFile =
-          await ImageCropper().cropImage(sourcePath: picked.path, uiSettings: [
-        AndroidUiSettings(
-          toolbarTitle: isHeader ? 'Edit Header Photo' : 'Edit Profile Photo',
-          toolbarColor: dk ? const Color(0xFF0B0B0D) : Colors.white,
-          toolbarWidgetColor: dk ? Colors.white : Colors.black,
-          statusBarColor: dk ? const Color(0xFF0B0B0D) : Colors.white,
-          backgroundColor: const Color(0xFF0B0B0D),
-          activeControlsWidgetColor: C.green,
-          dimmedLayerColor: Colors.black.withValues(alpha: 0.75),
-          cropFrameColor: C.green,
-          cropGridColor: Colors.white.withValues(alpha: 0.4),
-          cropFrameStrokeWidth: 2,
-          cropGridStrokeWidth: 1,
-          cropStyle: isHeader ? CropStyle.rectangle : CropStyle.circle,
-          initAspectRatio: isHeader
-              ? CropAspectRatioPreset.ratio16x9
-              : CropAspectRatioPreset.square,
-          lockAspectRatio: !isHeader,
-          hideBottomControls: isHeader ? false : true,
-          showCropGrid: true,
-          aspectRatioPresets: isHeader
-              ? const [
-                  CropAspectRatioPreset.ratio16x9,
-                  CropAspectRatioPreset.ratio4x3,
-                  CropAspectRatioPreset.ratio3x2,
-                  CropAspectRatioPreset.original
-                ]
-              : const [CropAspectRatioPreset.square],
-        ),
-        IOSUiSettings(
-          title: isHeader ? 'Edit Header Photo' : 'Edit Profile Photo',
-          doneButtonTitle: 'Done',
-          cancelButtonTitle: 'Cancel',
-          cropStyle: isHeader ? CropStyle.rectangle : CropStyle.circle,
-          aspectRatioLockEnabled: !isHeader,
-          resetAspectRatioEnabled: isHeader,
-          aspectRatioPresets: isHeader
-              ? const [
-                  CropAspectRatioPreset.ratio16x9,
-                  CropAspectRatioPreset.ratio4x3,
-                  CropAspectRatioPreset.ratio3x2,
-                  CropAspectRatioPreset.original
-                ]
-              : const [CropAspectRatioPreset.square],
-        ),
-        WebUiSettings(context: context),
-      ]);
-      if (croppedFile == null || !mounted) return;
-      final croppedBytes = await croppedFile.readAsBytes();
-      final croppedX = XFile.fromData(croppedBytes,
-          name: 'cropped.jpg', mimeType: 'image/jpeg');
+      final XFile croppedX;
+      if (kIsWeb) {
+        // image_cropper's web UI has no working "Done" button — use the
+        // custom cross-platform crop screen instead.
+        final bytes = await picked.readAsBytes();
+        if (!mounted) return;
+        final croppedBytes = await Navigator.of(context).push<Uint8List>(
+          MaterialPageRoute(
+            builder: (_) => CropScreen(
+              bytes: bytes,
+              shape: isHeader ? CropShape.rect : CropShape.circle,
+              aspectRatio: isHeader ? 16 / 9 : 1,
+            ),
+          ),
+        );
+        if (croppedBytes == null || !mounted) return;
+        croppedX = XFile.fromData(croppedBytes,
+            name: 'cropped.png', mimeType: 'image/png');
+      } else {
+        final dk = context.read<DarkProvider>().isDark;
+        final croppedFile =
+            await ImageCropper().cropImage(sourcePath: picked.path, uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: isHeader ? 'Edit Header Photo' : 'Edit Profile Photo',
+            toolbarColor: dk ? const Color(0xFF0B0B0D) : Colors.white,
+            toolbarWidgetColor: dk ? Colors.white : Colors.black,
+            statusBarColor: dk ? const Color(0xFF0B0B0D) : Colors.white,
+            backgroundColor: const Color(0xFF0B0B0D),
+            activeControlsWidgetColor: C.green,
+            dimmedLayerColor: Colors.black.withValues(alpha: 0.75),
+            cropFrameColor: C.green,
+            cropGridColor: Colors.white.withValues(alpha: 0.4),
+            cropFrameStrokeWidth: 2,
+            cropGridStrokeWidth: 1,
+            cropStyle: isHeader ? CropStyle.rectangle : CropStyle.circle,
+            initAspectRatio: isHeader
+                ? CropAspectRatioPreset.ratio16x9
+                : CropAspectRatioPreset.square,
+            lockAspectRatio: !isHeader,
+            hideBottomControls: isHeader ? false : true,
+            showCropGrid: true,
+            aspectRatioPresets: isHeader
+                ? const [
+                    CropAspectRatioPreset.ratio16x9,
+                    CropAspectRatioPreset.ratio4x3,
+                    CropAspectRatioPreset.ratio3x2,
+                    CropAspectRatioPreset.original
+                  ]
+                : const [CropAspectRatioPreset.square],
+          ),
+          IOSUiSettings(
+            title: isHeader ? 'Edit Header Photo' : 'Edit Profile Photo',
+            doneButtonTitle: 'Done',
+            cancelButtonTitle: 'Cancel',
+            cropStyle: isHeader ? CropStyle.rectangle : CropStyle.circle,
+            aspectRatioLockEnabled: !isHeader,
+            resetAspectRatioEnabled: isHeader,
+            aspectRatioPresets: isHeader
+                ? const [
+                    CropAspectRatioPreset.ratio16x9,
+                    CropAspectRatioPreset.ratio4x3,
+                    CropAspectRatioPreset.ratio3x2,
+                    CropAspectRatioPreset.original
+                  ]
+                : const [CropAspectRatioPreset.square],
+          ),
+        ]);
+        if (croppedFile == null || !mounted) return;
+        final croppedBytes = await croppedFile.readAsBytes();
+        croppedX = XFile.fromData(croppedBytes,
+            name: 'cropped.jpg', mimeType: 'image/jpeg');
+      }
       final String? url = isHeader
           ? await Api.uploadHeaderPhoto(croppedX)
           : await Api.uploadProfilePhoto(croppedX);

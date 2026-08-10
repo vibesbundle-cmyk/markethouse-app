@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,7 @@ import '../theme/dark.dart';
 import '../theme/state.dart';
 import '../services/api.dart';
 import '../services/safe_file.dart';
+import '../services/ws_service.dart';
 import '../widgets/bits.dart';
 import 'community_chat.dart';
 
@@ -43,16 +45,23 @@ class _CommunityScreenState extends State<CommunityScreen>
   List _all = [], _trending = [], _mine = [];
   bool _loading = true;
   String _search = '';
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
 
   @override
   void initState() {
     super.initState();
     _tab = TabController(length: 3, vsync: this);
     _load();
+    // A join/leave on another device (or from the detail screen) updates the
+    // "My Communities" tab + member counts here without a manual refresh.
+    _wsSub = WsService().stream.listen((ev) {
+      if (ev['type'] == 'community_join') _load();
+    });
   }
 
   @override
   void dispose() {
+    _wsSub?.cancel();
     _tab.dispose();
     super.dispose();
   }
@@ -1902,6 +1911,11 @@ class _CommunityDetailState extends State<CommunityDetailScreen>
                                           );
                                           if (ctx2.mounted) {
                                             Navigator.pop(ctx2);
+                                            // Jump to the New tab so the just-
+                                            // posted thread is visible at the top
+                                            // instead of buried in Hot sorting.
+                                            _tab.animateTo(1);
+                                            _sort = 'new';
                                             _load();
                                           }
                                         } catch (e) {

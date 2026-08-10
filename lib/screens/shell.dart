@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/colors.dart';
 import '../theme/dark.dart';
+import '../theme/state.dart';
 import '../services/chat_provider.dart';
 import '../services/location_service.dart';
+import '../services/ws_service.dart';
 import 'feed.dart';
 import 'commerce.dart';
 import 'community.dart';
@@ -29,6 +31,12 @@ class _ShellState extends State<Shell> {
       // anywhere — so no user's location ever reached the backend, which
       // meant the Nearby tab could never return anything no matter what.
       LocationService().syncCurrentLocation();
+      // Keep the in-memory profile (followers/following counts, photos,
+      // post count) fresh in realtime, then connect the socket.
+      final app = context.read<AppState>();
+      WsService().stream.listen(app.applyRealtime);
+      WsService().reset();
+      WsService().connect();
     });
   }
 

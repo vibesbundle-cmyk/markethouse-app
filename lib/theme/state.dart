@@ -58,4 +58,47 @@ class AppState extends ChangeNotifier {
     _user = _user!.copyWith(headerPhoto: path);
     notifyListeners();
   }
+
+  /// Applies realtime events pushed by the websocket so the in-memory
+  /// profile (and everything that renders `user`) stays fresh without a
+  /// manual refresh or re-login.
+  ///
+  /// Supported events: follow (following/followers counts), profile_updated
+  /// (avatar or header photo URL), post_created (post count).
+  void applyRealtime(Map<String, dynamic> ev) {
+    final u = _user;
+    if (u == null) return;
+    final String type = ev['type'] ?? '';
+    bool changed = false;
+    switch (type) {
+      case 'follow':
+        final int delta = (ev['delta'] ?? 0) as int;
+        final int actor = (ev['actor_id'] ?? 0) as int;
+        final int target = (ev['user_id'] ?? 0) as int;
+        if (actor == u.id && delta != 0) {
+          _user = u.copyWith(following: (u.following + delta).clamp(0, 1 << 30));
+          changed = true;
+        }
+        if (target == u.id && delta != 0) {
+          _user = _user!.copyWith(followers: (_user!.followers + delta).clamp(0, 1 << 30));
+          changed = true;
+        }
+      case 'profile_updated':
+        final int userId = (ev['user_id'] ?? 0) as int;
+        final String? url = ev['url'] as String?;
+        if (userId == u.id && url != null && url.isNotEmpty) {
+          final String uploadType = ev['upload_type'] ?? 'profile';
+          _user = uploadType == 'header'
+              ? u.copyWith(headerPhoto: url)
+              : u.copyWith(profilePhoto: url);
+          changed = true;
+        }
+      case 'post_created':
+        if ((ev['user_id'] ?? 0) as int == u.id) {
+          _user = u.copyWith(posts: u.posts + 1);
+          changed = true;
+        }
+    }
+    if (changed) notifyListeners();
+  }
 }

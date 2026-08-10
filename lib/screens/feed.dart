@@ -5,6 +5,7 @@ import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../services/api.dart';
 import '../services/location_service.dart';
+import '../services/ws_service.dart';
 import '../widgets/post_feed_card.dart';
 import 'profile.dart' show showPostCreator;
 import 'search.dart';
@@ -42,14 +43,31 @@ class FeedState extends State<Feed> with TickerProviderStateMixin {
     });
     _load('for_you');   // start with For You (most engaging)
     _load('following'); // also pre-load Following
+    // New/updated posts pushed over the socket (post_created, post_like,
+    // post_comment, post_reshare) refresh the visible feed in realtime.
+    _wsSub = WsService().stream.listen((ev) {
+      switch (ev['type']) {
+        case 'post_created':
+        case 'post_like':
+        case 'post_comment':
+        case 'post_reshare':
+          if (mounted) _load(_tabKey);
+      }
+    });
   }
+
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
 
   /// Refetch whatever tab is currently visible (called from the shell when the
   /// Home tab is tapped again, so a post made from Profile shows up here).
   Future<void> reload() => _load(_tabKey);
 
   @override
-  void dispose() { _tab.dispose(); super.dispose(); }
+  void dispose() {
+    _wsSub?.cancel();
+    _tab.dispose();
+    super.dispose();
+  }
 
   String get _tabKey => ['following', 'for_you', 'trending', 'nearby'][_tab.index];
 
@@ -113,7 +131,10 @@ class FeedState extends State<Feed> with TickerProviderStateMixin {
           IconButton(
             icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 26),
             tooltip: 'Create post',
-            onPressed: () => showPostCreator(context),
+            onPressed: () async {
+              await showPostCreator(context);
+              if (mounted) _load(_tabKey); // show the new post right away
+            },
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
