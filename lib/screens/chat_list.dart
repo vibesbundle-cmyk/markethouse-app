@@ -116,9 +116,9 @@ class _ChatListState extends State<ChatList> {
           if (_searchQuery.isNotEmpty) {
             final q = _searchQuery.toLowerCase();
             convs = convs.where((c) =>
-              c.otherUser.username.toLowerCase().contains(q) ||
-              c.otherUser.fullName.toLowerCase().contains(q) ||
-              c.lastMessage.toLowerCase().contains(q)
+              (c.otherUser.username ?? '').toLowerCase().contains(q) ||
+              (c.otherUser.fullName ?? '').toLowerCase().contains(q) ||
+              (c.lastMessage ?? '').toLowerCase().contains(q)
             ).toList();
           }
           final pinned = convs.where((c) => c.isPinned).toList();
