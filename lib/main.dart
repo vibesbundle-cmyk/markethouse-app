@@ -6,7 +6,9 @@ import 'theme/dark.dart';
 import 'theme/state.dart';
 import 'screens/welcome.dart';
 import 'screens/shell.dart';
+import 'screens/community.dart';
 import 'services/api.dart';
+import 'services/push_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,6 +62,7 @@ class _AuthGateState extends State<AuthGate> {
         if (user != null) {
           if (!mounted) return;
           context.read<AppState>().setUser(user);
+          initPush(); // register push token after login
           await Api.rememberCurrentAccount(
             userId: user.id,
             username: user.username,
@@ -68,6 +71,7 @@ class _AuthGateState extends State<AuthGate> {
           );
           if (!mounted) return;
           _screen = const Shell();
+          _openDeepLinkedCommunity();
         }
       }
     } catch (_) {
@@ -76,6 +80,25 @@ class _AuthGateState extends State<AuthGate> {
     if (!mounted) return;
     setState(() {
       _loading = false;
+    });
+  }
+
+  // Shared community links look like .../#/community/<id> — once the shell is
+  // up, fetch that community and push its page on top.
+  void _openDeepLinkedCommunity() {
+    final m =
+        RegExp(r'^/community/(\d+)').firstMatch(Uri.base.fragment.trim());
+    if (m == null) return;
+    final id = int.tryParse(m.group(1)!);
+    if (id == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        final c = await Api.getCommunityById(id);
+        if (c == null || !mounted) return;
+        Navigator.push(context,
+            MaterialPageRoute(builder: (_) => CommunityDetailScreen(data: c)));
+      } catch (_) {}
     });
   }
 

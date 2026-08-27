@@ -7,6 +7,7 @@ import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../theme/state.dart';
 import '../services/api.dart';
+import '../services/push_service.dart';
 import '../widgets/bits.dart';
 import 'signup.dart';
 import 'forgot.dart';
@@ -68,6 +69,7 @@ class _LoginState extends State<Login> {
         if (!mounted) return;
         if (u != null) {
           context.read<AppState>().setUser(u);
+          initPush();
           await Api.rememberCurrentAccount(
             userId: u.id,
             username: u.username,

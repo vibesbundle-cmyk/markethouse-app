@@ -8,6 +8,7 @@ import '../theme/colors.dart';
 import '../theme/dark.dart';
 import '../theme/state.dart';
 import '../services/api.dart';
+import '../services/push_service.dart';
 import '../widgets/bits.dart';
 import 'sync.dart';
 
@@ -132,6 +133,7 @@ class _VerifyState extends State<Verify> {
     if (!mounted) return;
     if (profile != null) {
       context.read<AppState>().setUser(profile);
+      initPush();
       await Api.rememberCurrentAccount(
         userId: profile.id,
         username: profile.username,
