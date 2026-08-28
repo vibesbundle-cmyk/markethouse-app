@@ -11,6 +11,7 @@ import '../models/chat.dart';
 import '../widgets/in_app_gallery_picker.dart';
 import '../widgets/status_ring.dart';
 import 'chat_window.dart';
+import 'community_chat.dart';
 import 'status_view.dart';
 
 class ChatList extends StatefulWidget {
@@ -22,24 +23,21 @@ class ChatList extends StatefulWidget {
 class _ChatListState extends State<ChatList> {
   String _filter = 'All';
   Map<int, List<Map>> _statusByUser = {};
-  Set<int> _favIds = {};
+  List<Map> _communities = [];
 
   @override
   void initState() {
     super.initState();
     _loadStatuses();
-    _loadFavorites();
+    _loadCommunities();
   }
 
-  Future<void> _loadFavorites() async {
+  Future<void> _loadCommunities() async {
     try {
-      final starred = await Api.getStarredMessages();
+      final all = await Api.getCommunities();
       if (mounted) {
         setState(() {
-          _favIds = starred
-              .map((m) => (m['conversation_id'] as num?)?.toInt() ?? 0)
-              .where((id) => id > 0)
-              .toSet();
+          _communities = List<Map>.from(all.where((c) => c['is_member'] == true));
         });
       }
     } catch (_) {}
@@ -129,10 +127,14 @@ class _ChatListState extends State<ChatList> {
           List<Conversation> convs;
           switch (_filter) {
             case 'Favorites':
-              // Show conversations that have starred messages
-              convs = active.where((c) => c.unreadCount >= 0 && _favIds.contains(c.id)).toList();
+              // Top 5 most recently active conversations
+              final sorted = active.toList()
+                ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+              convs = sorted.take(5).toList();
             case 'Unread':
               convs = active.where((c) => c.unreadCount > 0).toList();
+            case 'Archived':
+              convs = archived;
             default:
               convs = active.toList();
           }
@@ -149,7 +151,7 @@ class _ChatListState extends State<ChatList> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   children: [
-                    for (final f in ['All', 'Unread', 'Favorites'])
+                    for (final f in ['All', 'Unread', 'Favorites', 'Communities', 'Archive'])
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: GestureDetector(
@@ -181,7 +183,7 @@ class _ChatListState extends State<ChatList> {
                                       : (dk ? C.subD : C.subL),
                                 ),
                               ),
-                              if (f == 'Favorites' && _favIds.isNotEmpty) ...[
+                              if (f == 'Unread' && cp.conversations.where((c) => c.unreadCount > 0 && !c.isArchived).isNotEmpty) ...[
                                 const SizedBox(width: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
@@ -192,7 +194,47 @@ class _ChatListState extends State<ChatList> {
                                         : C.green.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: Text('${_favIds.length}',
+                                  child: Text('${cp.conversations.where((c) => c.unreadCount > 0 && !c.isArchived).length}',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: _filter == f
+                                              ? Colors.white
+                                              : C.green)),
+                                ),
+                              ],
+                              if (f == 'Communities' && _communities.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: _filter == f
+                                        ? Colors.white24
+                                        : C.green.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text('${_communities.length}',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: _filter == f
+                                              ? Colors.white
+                                              : C.green)),
+                                ),
+                              ],
+                              if (f == 'Archive' && archived.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: _filter == f
+                                        ? Colors.white24
+                                        : C.green.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text('${archived.length}',
                                       style: TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,
@@ -210,54 +252,74 @@ class _ChatListState extends State<ChatList> {
               ),
               // List
               Expanded(
-                child: cp.loading && convs.isEmpty
-                    ? const Center(
-                        child: CircularProgressIndicator(color: C.green))
-                    : RefreshIndicator(
+                child: _filter == 'Communities'
+                    ? RefreshIndicator(
                         color: C.green,
-                        onRefresh: () => cp.init(),
-                        child: convs.isEmpty
-                            ? (cp.lastFetchFailed && !cp.loading
-                                ? _buildError(dk)
-                                : _buildEmpty(dk))
-                            : ListView(
-                                children: [
-                                  if (pinned.isNotEmpty) ...[
-                                    Padding(
-                                      padding:
-                                          const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                                      child: Text('PINNED',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w700,
-                                              color: dk ? C.subD : C.subL,
-                                              letterSpacing: 1)),
-                                    ),
-                                    ...pinned.expand((c) => [
-                                      _ChatTile(
-                                          conv: c,
-                                          dk: dk,
-                                          statusItems:
-                                              _statusByUser[c.otherUser.id],
-                                          onStatusWatched: _onStatusesChanged),
-                                      Divider(
-                                          indent: 20, endIndent: 20, height: 1,
-                                          color: dk ? Colors.white10 : Colors.black12),
-                                    ]),
-                                  ],
-                                  ...regular.expand((c) => [
-                                    _ChatTile(
-                                        conv: c,
-                                        dk: dk,
-                                        statusItems: _statusByUser[c.otherUser.id],
-                                        onStatusWatched: _onStatusesChanged),
-                                    Divider(
-                                        indent: 20, endIndent: 20, height: 1,
-                                        color: dk ? Colors.white10 : Colors.black12),
-                                  ]),
-                                ],
+                        onRefresh: _loadCommunities,
+                        child: _communities.isEmpty
+                            ? _buildEmptyCommunities(dk)
+                            : ListView.separated(
+                                itemCount: _communities.length,
+                                separatorBuilder: (_, __) => Divider(
+                                    indent: 20, endIndent: 20, height: 1,
+                                    color: dk ? Colors.white10 : Colors.black12),
+                                itemBuilder: (_, i) {
+                                  final c = _communities[i];
+                                  return _CommunityTile(
+                                    community: c,
+                                    dk: dk,
+                                  );
+                                },
                               ),
-                      ),
+                      )
+                    : cp.loading && convs.isEmpty
+                        ? const Center(
+                            child: CircularProgressIndicator(color: C.green))
+                        : RefreshIndicator(
+                            color: C.green,
+                            onRefresh: () => cp.init(),
+                            child: convs.isEmpty
+                                ? (cp.lastFetchFailed && !cp.loading
+                                    ? _buildError(dk)
+                                    : _buildEmpty(dk))
+                                : ListView(
+                                    children: [
+                                      if (pinned.isNotEmpty) ...[
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                                          child: Text('PINNED',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: dk ? C.subD : C.subL,
+                                                  letterSpacing: 1)),
+                                        ),
+                                        ...pinned.expand((c) => [
+                                          _ChatTile(
+                                              conv: c,
+                                              dk: dk,
+                                              statusItems:
+                                                  _statusByUser[c.otherUser.id],
+                                              onStatusWatched: _onStatusesChanged),
+                                          Divider(
+                                              indent: 20, endIndent: 20, height: 1,
+                                              color: dk ? Colors.white10 : Colors.black12),
+                                        ]),
+                                      ],
+                                      ...regular.expand((c) => [
+                                        _ChatTile(
+                                            conv: c,
+                                            dk: dk,
+                                            statusItems: _statusByUser[c.otherUser.id],
+                                            onStatusWatched: _onStatusesChanged),
+                                        Divider(
+                                            indent: 20, endIndent: 20, height: 1,
+                                            color: dk ? Colors.white10 : Colors.black12),
+                                      ]),
+                                    ],
+                                  ),
+                          ),
               ),
             ],
           );
@@ -341,6 +403,18 @@ class _ChatListState extends State<ChatList> {
       },
     );
   }
+
+  Widget _buildEmptyCommunities(bool dk) => ListView(
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.3),
+          Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.people_outline_rounded, size: 56, color: dk ? C.subD : C.subL),
+            const SizedBox(height: 12),
+            Text('No communities yet',
+                style: TextStyle(color: dk ? C.subD : C.subL, fontSize: 15)),
+          ]),
+        ],
+      );
 
   // -- Global chat settings (wallpaper + bubble defaults for ALL chats) --
 
@@ -641,6 +715,57 @@ class _ChatTile extends StatelessWidget {
           context,
           MaterialPageRoute(builder: (_) => ChatWindow(conv: conv)),
         ).then((_) => ChatProvider.instance.refresh());
+      },
+    );
+  }
+}
+
+class _CommunityTile extends StatelessWidget {
+  final Map community;
+  final bool dk;
+  const _CommunityTile({required this.community, required this.dk});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = community['name'] as String? ?? '';
+    final icon = community['icon'] as String? ?? '';
+    final memberCount = community['member_count'] as int? ?? 0;
+    final id = (community['id'] as num).toInt();
+    final hasIcon = icon.isNotEmpty;
+    final avatar = CircleAvatar(
+      radius: 28,
+      backgroundColor: C.green.withValues(alpha: 0.15),
+      backgroundImage: hasIcon ? NetworkImage(Api.resolveUrl(icon)) : null,
+      child: !hasIcon
+          ? Text(name.isNotEmpty ? name[0].toUpperCase() : '#',
+              style: const TextStyle(
+                  color: C.green,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16))
+          : null,
+    );
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      leading: avatar,
+      title: Text(name,
+          style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: dk ? C.textD : C.textL)),
+      subtitle: Text('$memberCount member${memberCount == 1 ? '' : 's'}',
+          style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+      trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CommunityChatScreen(
+              communityId: id,
+              communityName: name,
+              communityIcon: icon,
+            ),
+          ),
+        );
       },
     );
   }
