@@ -68,7 +68,8 @@ class _PostTypeChooser extends StatelessWidget {
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 40, height: 4,
               decoration: BoxDecoration(color: dk ? C.borderD : C.borderL, borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 20),
@@ -108,6 +109,7 @@ class _PostTypeChooser extends StatelessWidget {
             ),
             const SizedBox(height: 8),
           ]),
+          ),
         ),
       ),
     );

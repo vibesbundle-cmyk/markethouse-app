@@ -457,6 +457,7 @@ class _ListingCardState extends State<_ListingCard> {
                 begin: Alignment.bottomCenter, end: Alignment.topCenter,
                 colors: [Colors.black.withValues(alpha: 0.65), Colors.transparent])),
             child: Text('₦${_fmt(hasDiscount ? discountPrice : price)}',
+              textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800)),
           )),
         // Out of stock overlay
@@ -723,13 +724,14 @@ class _ListingPostState extends State<_ListingPost> {
         // ── Title + price ────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
             if (price != null)
               Text('₦${_fmt(hasDiscount ? discountPrice : price)}',
+                textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
             const SizedBox(height: 2),
             Text(item['title'] as String? ?? '',
-              maxLines: 2, overflow: TextOverflow.ellipsis,
+              maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL, height: 1.3)),
           ]),
         ),

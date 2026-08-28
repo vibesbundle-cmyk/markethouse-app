@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../widgets/status_ring.dart';
 import 'chat_window.dart';
 import 'community_chat.dart';
 import 'status_view.dart';
+import '../services/ws_service.dart';
 
 class ChatList extends StatefulWidget {
   const ChatList({super.key});
@@ -24,12 +26,24 @@ class _ChatListState extends State<ChatList> {
   String _filter = 'All';
   Map<int, List<Map>> _statusByUser = {};
   List<Map> _communities = [];
+  StreamSubscription? _wsSub;
 
   @override
   void initState() {
     super.initState();
     _loadStatuses();
     _loadCommunities();
+    _wsSub = WsService().stream.listen((msg) {
+      if (msg['type'] == 'community_join' && mounted) {
+        _loadCommunities();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _wsSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadCommunities() async {
@@ -148,10 +162,13 @@ class _ChatListState extends State<ChatList> {
               Container(height: 0.5, color: dk ? C.borderD : C.borderL),
               // Filter chips
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  children: [
-                    for (final f in ['All', 'Unread', 'Favorites', 'Communities', 'Archive'])
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      for (final f in ['All', 'Unread', 'Favorites', 'Communities', 'Archive'])
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: GestureDetector(
@@ -247,7 +264,8 @@ class _ChatListState extends State<ChatList> {
                           ),
                         ),
                       ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               // List
