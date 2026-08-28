@@ -244,8 +244,11 @@ class ChatMessage {
 
   /// Short one-line preview for reply bars and quotes.
   String get previewText {
-    if (isImage) return content.isNotEmpty ? content : '📷 Photo';
-    if (isVideo) return content.isNotEmpty ? content : '🎬 Video';
+    // For status replies and other JSON-content messages, extract the caption.
+    final extracted = _extractCaption;
+    if (extracted != null) return extracted;
+    if (isImage) return '📷 Photo';
+    if (isVideo) return '🎬 Video';
     if (isAudio) return '🎤 Voice note';
     if (isSticker) return content;
     if (isFile) return '📄 $fileName';
@@ -255,6 +258,20 @@ class ChatMessage {
     }
     if (isLocation) return '📍 Location';
     return content;
+  }
+
+  /// If content is a JSON blob with a "caption" key, return the caption.
+  /// Also handles status_quote payloads where the real text is in caption.
+  String? get _extractCaption {
+    if (content.isEmpty) return null;
+    try {
+      final d = jsonDecode(content);
+      if (d is Map<String, dynamic>) {
+        final caption = d['caption'] as String?;
+        if (caption != null && caption.isNotEmpty) return caption;
+      }
+    } catch (_) {}
+    return null;
   }
 
   static String _fmtNaira(double v) =>

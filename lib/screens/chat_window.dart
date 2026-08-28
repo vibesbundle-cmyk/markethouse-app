@@ -241,9 +241,10 @@ class _ChatWindowState extends State<ChatWindow> {
       }
       if (_bubbleColorHex.isEmpty) {
         _bubbleColorHex = gBubble as String;
-        if (_bubbleOpacity >= 1.0 && (gOpacity as double) < 1.0) {
-          _bubbleOpacity = gOpacity;
-        }
+      }
+      // Always apply global opacity regardless of per-chat bubble color.
+      if (_bubbleOpacity >= 1.0 && (gOpacity as double) < 1.0) {
+        _bubbleOpacity = gOpacity;
       }
     });
     _syncAccent();
@@ -3335,7 +3336,7 @@ class _MessageBubble extends StatelessWidget {
     // Visibility only fades the bubble paint itself, never the message:
     // text, time and media stay fully opaque so the wallpaper shows
     // through while everything stays readable.
-    final o = msg.isMine ? bubbleOpacity.clamp(0.15, 1.0) : 1.0;
+    final o = bubbleOpacity.clamp(0.15, 1.0);
     final bubbleDecoration = msg.isMine
         ? BoxDecoration(
             gradient: bubbleColorHex.isEmpty
@@ -3357,9 +3358,9 @@ class _MessageBubble extends StatelessWidget {
             ),
           )
         : BoxDecoration(
-            color: dk ? const Color(0xFF232329) : Colors.white,
+            color: (dk ? const Color(0xFF232329) : Colors.white).withValues(alpha: o),
             border: Border.all(
-                color: dk ? C.borderD : const Color(0xFFE7E7EC), width: 1),
+                color: (dk ? C.borderD : const Color(0xFFE7E7EC)).withValues(alpha: o), width: 1),
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(20),
               topRight: Radius.circular(20),

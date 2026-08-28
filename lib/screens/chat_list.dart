@@ -1517,110 +1517,33 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
                     final senderName = m['sender_name'] as String? ?? 'Unknown';
                     final senderPhoto = m['sender_photo'] as String? ?? '';
                     final receiverName = m['receiver_name'] as String? ?? '';
-                    final body = m['body'] as String? ?? '';
+                    var body = m['body'] as String? ?? '';
                     final time = m['created_at'] as String? ?? '';
                     final convId = (m['conversation_id'] as num?)?.toInt() ?? 0;
                     final msgType = m['message_type'] as String? ?? 'text';
                     final mediaUrl = m['media_url'] as String? ?? '';
                     final isMine = (m['sender_id'] as num?)?.toInt() == ChatProvider.instance.myUserId;
 
-                    // Build subtitle based on message type
-                    Widget subtitle;
-                    if (msgType == 'image' && mediaUrl.isNotEmpty) {
-                      subtitle = Row(
-                        children: [
-                          Icon(Icons.image_rounded, size: 14,
-                              color: dk ? C.subD : C.subL),
-                          const SizedBox(width: 4),
-                          Flexible(child: Text(body.isNotEmpty ? body : 'Photo',
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL))),
-                        ],
-                      );
-                    } else if (msgType == 'video' && mediaUrl.isNotEmpty) {
-                      subtitle = Row(
-                        children: [
-                          Icon(Icons.videocam_rounded, size: 14,
-                              color: dk ? C.subD : C.subL),
-                          const SizedBox(width: 4),
-                          Flexible(child: Text(body.isNotEmpty ? body : 'Video',
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL))),
-                        ],
-                      );
-                    } else if (msgType == 'voice' || msgType == 'audio') {
-                      subtitle = Row(
-                        children: [
-                          Icon(Icons.mic_rounded, size: 14,
-                              color: dk ? C.subD : C.subL),
-                          const SizedBox(width: 4),
-                          Text('Voice message',
-                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
-                        ],
-                      );
-                    } else if (msgType == 'location') {
-                      subtitle = Row(
-                        children: [
-                          Icon(Icons.location_on_rounded, size: 14,
-                              color: dk ? C.subD : C.subL),
-                          const SizedBox(width: 4),
-                          Text('Location',
-                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
-                        ],
-                      );
-                    } else {
-                      subtitle = Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL));
-                    }
+                    // Parse JSON body to extract caption (for status replies)
+                    String displayText = body;
+                    String imageFromJson = '';
+                    try {
+                      final d = jsonDecode(body);
+                      if (d is Map<String, dynamic>) {
+                        final caption = d['caption'] as String?;
+                        if (caption != null && caption.isNotEmpty) displayText = caption;
+                        final sq = d['status_quote'];
+                        if (sq is Map) {
+                          final sqMedia = sq['media'] as String?;
+                          if (sqMedia != null && sqMedia.isNotEmpty) imageFromJson = sqMedia;
+                        }
+                      }
+                    } catch (_) {}
 
-                    // Bubble container
-                    final bubble = Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isMine
-                            ? C.green.withValues(alpha: 0.08)
-                            : (dk ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03)),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Sender name
-                          Text(senderName,
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                                  color: C.green)),
-                          const SizedBox(height: 4),
-                          // Media thumbnail for images
-                          if (msgType == 'image' && mediaUrl.isNotEmpty) ...[
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                Api.resolveUrl(mediaUrl),
-                                width: 120, height: 120, fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
-                                  width: 120, height: 120,
-                                  color: dk ? Colors.white12 : Colors.black12,
-                                  child: Icon(Icons.broken_image_rounded,
-                                      color: dk ? C.subD : C.subL),
-                                ),
-                              ),
-                            ),
-                            if (body.isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL)),
-                            ],
-                          ] else ...[
-                            subtitle,
-                          ],
-                          const SizedBox(height: 4),
-                          // Time
-                          Text(time.length > 16 ? time.substring(0, 16) : time,
-                              style: TextStyle(fontSize: 10, color: dk ? C.subD : C.subL)),
-                        ],
-                      ),
-                    );
+                    // Determine the image to show
+                    final displayImage = mediaUrl.isNotEmpty ? mediaUrl : imageFromJson;
+                    final showImage = (msgType == 'image' || imageFromJson.isNotEmpty) && displayImage.isNotEmpty;
+                    final showVideo = msgType == 'video' && mediaUrl.isNotEmpty;
 
                     return GestureDetector(
                       onTap: () {
@@ -1641,7 +1564,97 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
                               )));
                         }
                       },
-                      child: bubble,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isMine
+                              ? C.green.withValues(alpha: 0.08)
+                              : (dk ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03)),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Sender row with photo + name
+                            Row(children: [
+                              CircleAvatar(
+                                radius: 14,
+                                backgroundColor: C.green.withValues(alpha: 0.15),
+                                backgroundImage: senderPhoto.isNotEmpty
+                                    ? NetworkImage(Api.resolveUrl(senderPhoto))
+                                    : null,
+                                child: senderPhoto.isEmpty
+                                    ? Text(senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
+                                        style: const TextStyle(color: C.green, fontSize: 11, fontWeight: FontWeight.w700))
+                                    : null,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(senderName,
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                                          color: dk ? C.textD : C.textL)),
+                                  if (receiverName.isNotEmpty)
+                                    Text('→ $receiverName',
+                                        style: TextStyle(fontSize: 10, color: dk ? C.subD : C.subL)),
+                                ],
+                              )),
+                              Text(time.length > 16 ? time.substring(0, 16) : time,
+                                  style: TextStyle(fontSize: 10, color: dk ? C.subD : C.subL)),
+                            ]),
+                            const SizedBox(height: 8),
+                            // Image (full width, larger)
+                            if (showImage) ...[
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Image.network(
+                                  Api.resolveUrl(displayImage),
+                                  width: double.infinity, height: 200, fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    width: double.infinity, height: 200,
+                                    color: dk ? Colors.white12 : Colors.black12,
+                                    child: Icon(Icons.broken_image_rounded,
+                                        color: dk ? C.subD : C.subL),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (showVideo) ...[
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Container(
+                                      width: double.infinity, height: 200,
+                                      color: dk ? Colors.white12 : Colors.black12,
+                                      child: Icon(Icons.videocam_rounded, size: 40,
+                                          color: dk ? C.subD : C.subL),
+                                    ),
+                                    const Icon(Icons.play_circle_fill_rounded,
+                                        size: 48, color: Colors.white70),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            // Text content
+                            if (displayText.isNotEmpty) ...[
+                              if (showImage || showVideo) const SizedBox(height: 6),
+                              Text(displayText, maxLines: 3, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL)),
+                            ],
+                            if (!showImage && !showVideo && displayText.isEmpty && msgType == 'voice')
+                              Row(children: [
+                                Icon(Icons.mic_rounded, size: 14, color: dk ? C.subD : C.subL),
+                                const SizedBox(width: 4),
+                                Text('Voice message',
+                                    style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+                              ]),
+                          ],
+                        ),
+                      ),
                     );
                   },
                 ),
