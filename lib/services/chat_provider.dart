@@ -148,6 +148,12 @@ class ChatProvider extends ChangeNotifier {
       _liveLocationController.add(msg);
     } else if (type == 'call_offer' || type == 'call_answer' || type == 'call_reject' || type == 'call_end') {
       _callController.add(msg);
+    } else if (type == 'message_deleted') {
+      final cid = (msg['conversation_id'] as num?)?.toInt();
+      if (cid != null) {
+        _messageCache.remove(cid);
+        _loadConversations();
+      }
     } else if (type == 'presence') {
       final uid = (msg['user_id'] as num?)?.toInt();
       final online = msg['online'] == true;

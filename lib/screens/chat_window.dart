@@ -263,6 +263,12 @@ class _ChatWindowState extends State<ChatWindow> {
       }
       return;
     }
+    if (type == 'message_deleted') {
+      final cid = (data['conversation_id'] as num?)?.toInt();
+      if (cid != _convId) return;
+      _reload();
+      return;
+    }
     if (type == 'conversation_purged') {
       final cid = (data['conversation_id'] as num?)?.toInt();
       if (cid != _convId) return;
