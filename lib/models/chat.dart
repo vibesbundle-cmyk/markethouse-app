@@ -1,9 +1,14 @@
 
+import 'dart:convert';
+
+import 'package:intl/intl.dart';
+
 class ChatUser {
   final int id;
   final String username;
   final String fullName;
   final String? profilePhoto;
+  final String? headerPhoto;
   final bool isOnline;
 
   const ChatUser(
@@ -11,6 +16,7 @@ class ChatUser {
       required this.username,
       required this.fullName,
       this.profilePhoto,
+      this.headerPhoto,
       this.isOnline = false});
 
   factory ChatUser.fromJson(Map<String, dynamic> j) => ChatUser(
@@ -18,6 +24,7 @@ class ChatUser {
         username: j['username'] as String? ?? '',
         fullName: j['full_name'] as String? ?? '',
         profilePhoto: j['profile_photo'] as String?,
+        headerPhoto: j['header_photo'] as String?,
         isOnline: j['is_online'] == true,
       );
 
@@ -26,6 +33,7 @@ class ChatUser {
       username: username,
       fullName: fullName,
       profilePhoto: profilePhoto,
+      headerPhoto: headerPhoto,
       isOnline: isOnline ?? this.isOnline);
 
   String get initials {
@@ -48,6 +56,10 @@ class Conversation {
   final bool isArchived;
   final String customCategory;
   final String wallpaper;
+  final String wallpaperColor;
+  final double wallpaperDim;
+  final String bubbleColor;
+  final double bubbleOpacity;
   final int disappearingSeconds;
   final bool isMuted;
 
@@ -61,6 +73,10 @@ class Conversation {
     this.isArchived = false,
     this.customCategory = '',
     this.wallpaper = '',
+    this.wallpaperColor = '',
+    this.wallpaperDim = 0.3,
+    this.bubbleColor = '',
+    this.bubbleOpacity = 1.0,
     this.disappearingSeconds = 0,
     this.isMuted = false,
   });
@@ -72,6 +88,7 @@ class Conversation {
           'username': j['other_user_name'] ?? '',
           'full_name': j['other_user_name'] ?? '',
           'profile_photo': j['other_user_photo'],
+          'header_photo': j['other_user_header'],
           'is_online': j['is_online'] == true,
         }),
         lastMessage: j['last_message'] as String? ?? '',
@@ -81,22 +98,46 @@ class Conversation {
         isArchived: j['is_archived'] == true,
         customCategory: j['custom_category'] as String? ?? '',
         wallpaper: j['wallpaper'] as String? ?? '',
+        wallpaperColor: j['wallpaper_color'] as String? ?? '',
+        wallpaperDim: (j['wallpaper_dim'] as num?)?.toDouble() ?? 0.3,
+        bubbleColor: j['bubble_color'] as String? ?? '',
+        bubbleOpacity: (j['bubble_opacity'] as num?)?.toDouble() ?? 1.0,
         disappearingSeconds: (j['disappearing_seconds'] as num?)?.toInt() ?? 0,
         isMuted: j['is_muted'] == true,
       );
 
-  Conversation copyWithOnline(bool online) => Conversation(
-      id: id,
-      otherUser: otherUser.copyWith(isOnline: online),
-      lastMessage: lastMessage,
-      lastTime: lastTime,
-      unreadCount: unreadCount,
-      isPinned: isPinned,
-      isArchived: isArchived,
-      customCategory: customCategory,
-      wallpaper: wallpaper,
-      disappearingSeconds: disappearingSeconds,
-      isMuted: isMuted);
+  Conversation copyWith({
+    ChatUser? otherUser,
+    int? unreadCount,
+    bool? isPinned,
+    bool? isArchived,
+    bool? isMuted,
+    String? wallpaper,
+    String? wallpaperColor,
+    double? wallpaperDim,
+    String? bubbleColor,
+    double? bubbleOpacity,
+  }) =>
+      Conversation(
+        id: id,
+        otherUser: otherUser ?? this.otherUser,
+        lastMessage: lastMessage,
+        lastTime: lastTime,
+        unreadCount: unreadCount ?? this.unreadCount,
+        isPinned: isPinned ?? this.isPinned,
+        isArchived: isArchived ?? this.isArchived,
+        customCategory: customCategory,
+        wallpaper: wallpaper ?? this.wallpaper,
+        wallpaperColor: wallpaperColor ?? this.wallpaperColor,
+        wallpaperDim: wallpaperDim ?? this.wallpaperDim,
+        bubbleColor: bubbleColor ?? this.bubbleColor,
+        bubbleOpacity: bubbleOpacity ?? this.bubbleOpacity,
+        disappearingSeconds: disappearingSeconds,
+        isMuted: isMuted ?? this.isMuted,
+      );
+
+  Conversation copyWithOnline(bool online) =>
+      copyWith(otherUser: otherUser.copyWith(isOnline: online));
 }
 
 class ChatMessage {
@@ -117,6 +158,8 @@ class ChatMessage {
   final String? mediaType;
   final String messageType;
   final int? replyToId;
+  final double? latitude;
+  final double? longitude;
 
   const ChatMessage({
     required this.id,
@@ -136,6 +179,8 @@ class ChatMessage {
     this.mediaType,
     this.messageType = 'text',
     this.replyToId,
+    this.latitude,
+    this.longitude,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> j, {int? myUserId}) {
@@ -159,6 +204,8 @@ class ChatMessage {
       mediaType: j['media_type'] as String?,
       messageType: j['message_type'] as String? ?? 'text',
       replyToId: (j['reply_to_id'] as num?)?.toInt(),
+      latitude: (j['latitude'] as num?)?.toDouble(),
+      longitude: (j['longitude'] as num?)?.toDouble(),
     );
   }
 
@@ -168,6 +215,50 @@ class ChatMessage {
     final m = createdAt.minute.toString().padLeft(2, '0');
     return '$h:$m';
   }
+
+  bool get isImage => messageType == 'image';
+  bool get isVideo => messageType == 'video';
+  bool get isAudio => messageType == 'audio' || messageType == 'voice';
+  bool get isSticker => messageType == 'sticker';
+  bool get isFile => messageType == 'file';
+  bool get isTransfer => messageType == 'transfer';
+  bool get isLocation => messageType == 'location';
+
+  /// For file/transfer messages content is a JSON blob.
+  Map<String, dynamic> get payload {
+    try {
+      final v = jsonDecode(content);
+      return v is Map<String, dynamic> ? v : const {};
+    } catch (_) {
+      return content.isEmpty ? const {} : {'name': content};
+    }
+  }
+
+  Map<String, dynamic> get fileInfo => isFile ? payload : const {};
+
+  String get fileName {
+    if (isFile) return (fileInfo['name'] as String?) ?? 'File';
+    if (isTransfer) return 'Transfer';
+    return content;
+  }
+
+  /// Short one-line preview for reply bars and quotes.
+  String get previewText {
+    if (isImage) return content.isNotEmpty ? content : '📷 Photo';
+    if (isVideo) return content.isNotEmpty ? content : '🎬 Video';
+    if (isAudio) return '🎤 Voice note';
+    if (isSticker) return content;
+    if (isFile) return '📄 $fileName';
+    if (isTransfer) {
+      final amount = fileInfo['amount'];
+      return '💸 ${amount != null ? _fmtNaira((amount as num).toDouble()) : 'Money transfer'}';
+    }
+    if (isLocation) return '📍 Location';
+    return content;
+  }
+
+  static String _fmtNaira(double v) =>
+      '₦${NumberFormat('#,##0.##').format(v)}';
 
   ChatMessage copyWith({
     bool? isStarred,
@@ -193,5 +284,7 @@ class ChatMessage {
         mediaType: mediaType,
         messageType: messageType,
         replyToId: replyToId,
+        latitude: latitude,
+        longitude: longitude,
       );
 }

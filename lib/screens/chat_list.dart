@@ -1325,13 +1325,73 @@ class _SettingsSlidePanelState extends State<_SettingsSlidePanel> {
             // ── Chat Settings ──
             _slideSection('CHAT SETTINGS', dk),
             _slideTile(Icons.wallpaper_rounded, 'Chat Wallpaper', dk,
-                onTap: () {}),
+                onTap: () {
+                  Navigator.pop(context);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: dk ? C.surfD : Colors.white,
+                    shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                    builder: (_) => DraggableScrollableSheet(
+                      expand: false,
+                      initialChildSize: 0.72,
+                      maxChildSize: 0.92,
+                      builder: (_, scrollCtl) => _GlobalChatSettings(dk: dk, scrollCtl: scrollCtl),
+                    ),
+                  );
+                }),
             _slideTile(Icons.brightness_6_outlined, 'Photo Dim', dk,
-                onTap: () {}),
+                onTap: () {
+                  Navigator.pop(context);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: dk ? C.surfD : Colors.white,
+                    shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                    builder: (_) => DraggableScrollableSheet(
+                      expand: false,
+                      initialChildSize: 0.72,
+                      maxChildSize: 0.92,
+                      builder: (_, scrollCtl) => _GlobalChatSettings(dk: dk, scrollCtl: scrollCtl),
+                    ),
+                  );
+                }),
             _slideTile(Icons.palette_outlined, 'Bubble Color', dk,
-                onTap: () {}),
+                onTap: () {
+                  Navigator.pop(context);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: dk ? C.surfD : Colors.white,
+                    shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                    builder: (_) => DraggableScrollableSheet(
+                      expand: false,
+                      initialChildSize: 0.72,
+                      maxChildSize: 0.92,
+                      builder: (_, scrollCtl) => _GlobalChatSettings(dk: dk, scrollCtl: scrollCtl),
+                    ),
+                  );
+                }),
             _slideTile(Icons.text_fields_rounded, 'Message Text Size', dk,
-                onTap: () {}),
+                onTap: () {
+                  Navigator.pop(context);
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: dk ? C.surfD : Colors.white,
+                    shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                    builder: (_) => DraggableScrollableSheet(
+                      expand: false,
+                      initialChildSize: 0.72,
+                      maxChildSize: 0.92,
+                      builder: (_, scrollCtl) => _GlobalChatSettings(dk: dk, scrollCtl: scrollCtl),
+                    ),
+                  );
+                }),
             const Divider(indent: 16, endIndent: 16, height: 24),
 
             // ── Status Settings ──
@@ -1460,36 +1520,109 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
                     final body = m['body'] as String? ?? '';
                     final time = m['created_at'] as String? ?? '';
                     final convId = (m['conversation_id'] as num?)?.toInt() ?? 0;
+                    final msgType = m['message_type'] as String? ?? 'text';
+                    final mediaUrl = m['media_url'] as String? ?? '';
+                    final isMine = (m['sender_id'] as num?)?.toInt() == ChatProvider.instance.myUserId;
 
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      leading: CircleAvatar(
-                        radius: 20,
-                        backgroundColor: C.green.withValues(alpha: 0.15),
-                        backgroundImage: senderPhoto.isNotEmpty
-                            ? NetworkImage(Api.resolveUrl(senderPhoto))
-                            : null,
-                        child: senderPhoto.isEmpty
-                            ? Text(senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
-                                style: const TextStyle(color: C.green, fontWeight: FontWeight.w700))
-                            : null,
+                    // Build subtitle based on message type
+                    Widget subtitle;
+                    if (msgType == 'image' && mediaUrl.isNotEmpty) {
+                      subtitle = Row(
+                        children: [
+                          Icon(Icons.image_rounded, size: 14,
+                              color: dk ? C.subD : C.subL),
+                          const SizedBox(width: 4),
+                          Flexible(child: Text(body.isNotEmpty ? body : 'Photo',
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL))),
+                        ],
+                      );
+                    } else if (msgType == 'video' && mediaUrl.isNotEmpty) {
+                      subtitle = Row(
+                        children: [
+                          Icon(Icons.videocam_rounded, size: 14,
+                              color: dk ? C.subD : C.subL),
+                          const SizedBox(width: 4),
+                          Flexible(child: Text(body.isNotEmpty ? body : 'Video',
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL))),
+                        ],
+                      );
+                    } else if (msgType == 'voice' || msgType == 'audio') {
+                      subtitle = Row(
+                        children: [
+                          Icon(Icons.mic_rounded, size: 14,
+                              color: dk ? C.subD : C.subL),
+                          const SizedBox(width: 4),
+                          Text('Voice message',
+                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+                        ],
+                      );
+                    } else if (msgType == 'location') {
+                      subtitle = Row(
+                        children: [
+                          Icon(Icons.location_on_rounded, size: 14,
+                              color: dk ? C.subD : C.subL),
+                          const SizedBox(width: 4),
+                          Text('Location',
+                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+                        ],
+                      );
+                    } else {
+                      subtitle = Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL));
+                    }
+
+                    // Bubble container
+                    final bubble = Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isMine
+                            ? C.green.withValues(alpha: 0.08)
+                            : (dk ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03)),
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      title: RichText(
-                        text: TextSpan(children: [
-                          TextSpan(text: senderName,
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                                  color: dk ? C.textD : C.textL)),
-                          if (receiverName.isNotEmpty) ...[
-                            const TextSpan(text: ' → '),
-                            TextSpan(text: receiverName,
-                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                                    color: dk ? C.subD : C.subL)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Sender name
+                          Text(senderName,
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                                  color: C.green)),
+                          const SizedBox(height: 4),
+                          // Media thumbnail for images
+                          if (msgType == 'image' && mediaUrl.isNotEmpty) ...[
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                Api.resolveUrl(mediaUrl),
+                                width: 120, height: 120, fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Container(
+                                  width: 120, height: 120,
+                                  color: dk ? Colors.white12 : Colors.black12,
+                                  child: Icon(Icons.broken_image_rounded,
+                                      color: dk ? C.subD : C.subL),
+                                ),
+                              ),
+                            ),
+                            if (body.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL)),
+                            ],
+                          ] else ...[
+                            subtitle,
                           ],
-                        ]),
+                          const SizedBox(height: 4),
+                          // Time
+                          Text(time.length > 16 ? time.substring(0, 16) : time,
+                              style: TextStyle(fontSize: 10, color: dk ? C.subD : C.subL)),
+                        ],
                       ),
-                      subtitle: Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
-                      trailing: Text(time, style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL)),
+                    );
+
+                    return GestureDetector(
                       onTap: () {
                         if (convId > 0) {
                           Navigator.push(context, MaterialPageRoute(
@@ -1508,6 +1641,7 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
                               )));
                         }
                       },
+                      child: bubble,
                     );
                   },
                 ),
