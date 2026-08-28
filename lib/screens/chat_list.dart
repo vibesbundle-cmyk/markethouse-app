@@ -1222,17 +1222,13 @@ class _SettingsSlidePanelState extends State<_SettingsSlidePanel> {
             // ── Chat Settings ──
             _slideSection('CHAT SETTINGS', dk),
             _slideTile(Icons.wallpaper_rounded, 'Chat Wallpaper', dk,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Coming soon')))),
+                onTap: () {}),
             _slideTile(Icons.brightness_6_outlined, 'Photo Dim', dk,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Coming soon')))),
+                onTap: () {}),
             _slideTile(Icons.palette_outlined, 'Bubble Color', dk,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Coming soon')))),
+                onTap: () {}),
             _slideTile(Icons.text_fields_rounded, 'Message Text Size', dk,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Coming soon')))),
+                onTap: () {}),
             const Divider(indent: 16, endIndent: 16, height: 24),
 
             // ── Status Settings ──
