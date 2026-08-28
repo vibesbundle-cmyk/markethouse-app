@@ -10,7 +10,7 @@ import '../models/user.dart';
 class Api {
   static const _base = String.fromEnvironment(
     'BASE_URL',
-    defaultValue: kDebugMode ? 'http://192.168.100.248:8080' : '',
+    defaultValue: kDebugMode ? 'http://192.168.100.95:8080' : '',
   );
 
   static String get baseUrl => _base;
@@ -20,7 +20,8 @@ class Api {
 
   // ── Tokens ───────────────────────────────────────────────────────────────
   static Future<String?> getToken() => AppStorage.read(key: 'jwt');
-  static Future<void> saveToken(String t) => AppStorage.write(key: 'jwt', value: t);
+  static Future<void> saveToken(String t) =>
+      AppStorage.write(key: 'jwt', value: t);
   static Future<void> saveRefresh(String t) =>
       AppStorage.write(key: 'refresh', value: t);
   static Future<void> clearTokens() async {
@@ -377,9 +378,16 @@ class Api {
   /// correctly in the "nearby" feed/marketplace and can share their
   /// location in chat. Coordinates come from [LocationService].
   static Future<Map<String, dynamic>> updateLocation(
-      double latitude, double longitude) async {
-    final r = await _put('/user/location',
-        body: {'latitude': latitude, 'longitude': longitude}, auth: true);
+      double latitude, double longitude,
+      {String? locationText}) async {
+    final body = <String, dynamic>{
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+    if (locationText != null && locationText.isNotEmpty) {
+      body['location_text'] = locationText;
+    }
+    final r = await _put('/user/location', body: body, auth: true);
     return _decode(r);
   }
 
@@ -407,6 +415,9 @@ class Api {
       return json['url'] as String?;
     } on TimeoutException {
       throw ApiException('Upload timed out.');
+    } on SocketException {
+      throw ApiException(
+          'Network error — check your connection and try again.');
     }
   }
 
@@ -570,6 +581,11 @@ class Api {
     bool isLocked = false,
     List<int> taggedUserIds = const [],
     String category = 'Other',
+    String location = '',
+    double? latitude,
+    double? longitude,
+    String audience = 'public',
+    List<int> audienceUserIds = const [],
   }) async {
     if (file != null) await _assertFileSize(file);
     final t = await getToken();
@@ -580,6 +596,13 @@ class Api {
     rq.fields['price'] = price.toString();
     rq.fields['is_locked'] = isLocked.toString();
     rq.fields['category'] = category;
+    if (location.isNotEmpty) rq.fields['location'] = location;
+    if (latitude != null) rq.fields['latitude'] = latitude.toString();
+    if (longitude != null) rq.fields['longitude'] = longitude.toString();
+    rq.fields['audience'] = audience;
+    if (audienceUserIds.isNotEmpty) {
+      rq.fields['audience_user_ids'] = audienceUserIds.join(',');
+    }
     if (taggedUserIds.isNotEmpty) {
       rq.fields['tagged_users'] = taggedUserIds.join(',');
     }
@@ -605,6 +628,11 @@ class Api {
     bool isLocked = false,
     List<int> taggedUserIds = const [],
     String category = 'Other',
+    String location = '',
+    double? latitude,
+    double? longitude,
+    String audience = 'public',
+    List<int> audienceUserIds = const [],
   }) async {
     for (final f in files) {
       await _assertFileSize(f);
@@ -617,6 +645,13 @@ class Api {
     rq.fields['price'] = price.toString();
     rq.fields['is_locked'] = isLocked.toString();
     rq.fields['category'] = category;
+    if (location.isNotEmpty) rq.fields['location'] = location;
+    if (latitude != null) rq.fields['latitude'] = latitude.toString();
+    if (longitude != null) rq.fields['longitude'] = longitude.toString();
+    rq.fields['audience'] = audience;
+    if (audienceUserIds.isNotEmpty) {
+      rq.fields['audience_user_ids'] = audienceUserIds.join(',');
+    }
     if (taggedUserIds.isNotEmpty) {
       rq.fields['tagged_users'] = taggedUserIds.join(',');
     }
@@ -645,6 +680,13 @@ class Api {
 
   static Future<void> deletePost(int postId) async =>
       _delete('/post/$postId', auth: true);
+
+  /// Pin/unpin a post on your own profile (IG/TikTok style, max 3).
+  static Future<void> pinPost(int postId, bool pin) async {
+    final r = await _post('/posts/$postId/pin', auth: true, body: {'pin': pin});
+    if (r.statusCode != 200)
+      throw Exception('Could not ${pin ? 'pin' : 'unpin'} post');
+  }
 
   static Future<List<dynamic>> getUserPosts(int userId) async {
     final r = await _get('/posts/$userId', auth: true);
@@ -735,6 +777,8 @@ class Api {
     String? mediaUrl,
     String? mediaType,
     int? replyToId,
+    double? latitude,
+    double? longitude,
   }) async {
     final r = await _post('/message/send',
         body: {
@@ -744,6 +788,8 @@ class Api {
           if (mediaUrl != null) 'media_url': mediaUrl,
           if (mediaType != null) 'media_type': mediaType,
           if (replyToId != null) 'reply_to_id': replyToId,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
         },
         auth: true);
     return _decode(r);
@@ -751,6 +797,23 @@ class Api {
 
   static Future<void> starMessage(int msgId, bool star) async =>
       _post('/message/$msgId/star', body: {'star': star}, auth: true);
+  static Future<List<Map<String, dynamic>>> getStarredMessages() async {
+    final r = await _get('/messages/starred', auth: true);
+    if (r.statusCode == 200) {
+      final data = _decode(r);
+      return (data['messages'] as List? ?? []).cast<Map<String, dynamic>>();
+    }
+    return [];
+  }
+  static Future<List<Map<String, dynamic>>> searchMessages(String query) async {
+    final r = await _get('/messages/search?q=${Uri.encodeComponent(query)}', auth: true);
+    if (r.statusCode == 200) {
+      final data = _decode(r);
+      return (data['messages'] as List? ?? []).cast<Map<String, dynamic>>();
+    }
+    return [];
+  }
+
   static Future<void> pinMessage(int msgId, bool pin) async =>
       _post('/message/$msgId/pin', body: {'pin': pin}, auth: true);
   static Future<void> reactMessage(int msgId, String reaction) async =>
@@ -759,9 +822,38 @@ class Api {
       _put('/message/$msgId', body: {'content': content}, auth: true);
   static Future<void> deleteMessage(int msgId) async =>
       _delete('/message/$msgId', auth: true);
+  static Future<void> reportMessage(int msgId, String reason,
+      {String details = ''}) async {
+    final r = await _post('/message/$msgId/report',
+        body: {'reason': reason, 'details': details}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error'] ?? 'Could not send report');
+    }
+  }
+
+  static Future<void> reportCommunityPost(int postId, String reason,
+      {String details = ''}) async {
+    final r = await _post('/community/post/$postId/report',
+        body: {'reason': reason, 'details': details}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error'] ?? 'Could not send report');
+    }
+  }
+
   static Future<void> updateConversationSettings(
           int convId, Map<String, dynamic> settings) async =>
       _put('/conversation/$convId/settings', body: settings, auth: true);
+
+  static Future<void> clearConversation(int convId) async =>
+      _post('/conversation/$convId/clear', auth: true);
+
+  static Future<void> hideConversation(int convId) async =>
+      _post('/conversation/$convId/hide', auth: true);
+
+  /// Deletes the whole chat for both people — messages, media, everything.
+  /// The next message starts the conversation completely fresh.
+  static Future<void> purgeConversation(int convId) async =>
+      _post('/conversation/$convId/purge', auth: true);
 
   static Future<List<dynamic>> conversations() async {
     final r = await _get('/conversations', auth: true);
@@ -898,6 +990,24 @@ class Api {
     return _decode(r);
   }
 
+  static Future<Map<String, dynamic>> checkoutBatch(
+      List<Map<String, dynamic>> items,
+      {String? deliveryDateISO}) async {
+    final body = <String, dynamic>{'items': items};
+    if (deliveryDateISO != null) {
+      body['delivery_date_scheduled'] = deliveryDateISO;
+    }
+    final r = await _post('/shop/checkout/batch', body: body, auth: true);
+    return _decode(r);
+  }
+
+  static Future<Map<String, dynamic>> confirmBatchPayment(
+      {required String reference}) async {
+    final r = await _post('/shop/checkout/confirm-batch',
+        body: {'reference': reference}, auth: true);
+    return _decode(r);
+  }
+
   static Future<List<dynamic>> getMyOrders({String role = 'buyer'}) async {
     final r = await _get('/orders/mine?role=$role', auth: true);
     if (r.statusCode == 200) return (_decode(r)['orders'] as List?) ?? [];
@@ -923,6 +1033,19 @@ class Api {
     return _decode(r);
   }
 
+  // ── Hashtags ──────────────────────────────────────────────────────────────
+  static Future<List<dynamic>> getHashtagPosts(String tag) async {
+    final r = await _get('/hashtags/$tag/posts', auth: true);
+    if (r.statusCode == 200) return (_decode(r)['posts'] as List?) ?? [];
+    return [];
+  }
+
+  static Future<List<dynamic>> getTrendingHashtags() async {
+    final r = await _get('/hashtags/trending', auth: true);
+    if (r.statusCode == 200) return (_decode(r)['hashtags'] as List?) ?? [];
+    return [];
+  }
+
   // ── Wallet ────────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> getWallet() async {
     final r = await _get('/wallet', auth: true);
@@ -937,19 +1060,118 @@ class Api {
     return [];
   }
 
-  static Future<void> walletDeposit(double amount, String desc) async =>
-      _post('/wallet/deposit',
-          body: {'amount': amount, 'description': desc}, auth: true);
+  static Future<void> walletDeposit(double amount, String desc) async {
+    final r = await _post('/wallet/deposit',
+        body: {'amount': amount, 'description': desc}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error']?.toString() ?? 'Deposit failed');
+    }
+  }
 
-  static Future<void> walletWithdraw(double amount, String desc) async =>
-      _post('/wallet/withdraw',
-          body: {'amount': amount, 'description': desc}, auth: true);
+  static Future<void> walletWithdraw(double amount, String desc) async {
+    final r = await _post('/wallet/withdraw',
+        body: {'amount': amount, 'description': desc}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error']?.toString() ?? 'Withdraw failed');
+    }
+  }
 
-  static Future<void> walletSend(
-          String username, double amount, String desc) async =>
-      _post('/wallet/send',
-          body: {'username': username, 'amount': amount, 'description': desc},
-          auth: true);
+  static Future<Map<String, dynamic>> walletSend(
+      int receiverId, double amount, String desc,
+      {String? pin}) async {
+    final r = await _post('/wallet/send',
+        body: {
+          'receiver_id': receiverId,
+          'amount': amount,
+          'description': desc,
+          if (pin != null) 'pin': pin,
+        },
+        auth: true);
+    final body = _decode(r);
+    if (r.statusCode != 200) {
+      throw ApiException(body['error']?.toString() ?? 'Transfer failed');
+    }
+    return body;
+  }
+
+  static Future<bool> transferPinEnabled() async {
+    final r = await _get('/wallet/pin', auth: true);
+    if (r.statusCode != 200) return false;
+    return (_decode(r)['set'] as bool?) ?? false;
+  }
+
+  static Future<void> setTransferPin(String currentPin, String newPin) async {
+    final r = await _post('/wallet/pin',
+        body: {'current_pin': currentPin, 'new_pin': newPin}, auth: true);
+    final body = _decode(r);
+    if (r.statusCode != 200) {
+      throw ApiException(
+          body['error']?.toString() ?? 'Could not set transfer password');
+    }
+  }
+
+  /// Request an OTP to be sent to the user's email for pin setup/reset.
+  static Future<void> requestTransferPinOtp() async {
+    final r = await _post('/wallet/pin/otp-request', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(
+          _decode(r)['error'] ?? 'Could not send verification code');
+    }
+  }
+
+  /// Set a new transfer pin using the OTP received via email.
+  static Future<void> setTransferPinOtp(String otp, String newPin) async {
+    final r = await _post('/wallet/pin/otp-set',
+        body: {'otp': otp, 'new_pin': newPin}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(
+          _decode(r)['error'] ?? 'Invalid code or could not set PIN');
+    }
+  }
+
+  /// Reset a forgotten transfer pin using OTP.
+  static Future<void> resetTransferPinOtp(String otp, String newPin) async {
+    final r = await _post('/wallet/pin/otp-reset',
+        body: {'otp': otp, 'new_pin': newPin}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(
+          _decode(r)['error'] ?? 'Invalid code or could not reset PIN');
+    }
+  }
+
+  static Future<Map<String, dynamic>> scheduleTransfer(
+      int receiverId, double amount, String desc, DateTime scheduledAt) async {
+    final r = await _post('/wallet/schedule',
+        body: {
+          'receiver_id': receiverId,
+          'amount': amount,
+          'description': desc,
+          'scheduled_at': scheduledAt.toUtc().toIso8601String(),
+        },
+        auth: true);
+    return _decode(r);
+  }
+
+  static Future<void> cancelScheduledTransfer(int id) async {
+    final r = await _delete('/wallet/schedule/$id', auth: true);
+    if (r.statusCode != 200) {
+      final body = _decode(r);
+      throw ApiException(body['error'] as String? ?? 'Failed to cancel');
+    }
+  }
+
+  static Future<List<dynamic>> getScheduledTransfers() async {
+    final r = await _get('/wallet/schedule', auth: true);
+    if (r.statusCode == 200) return (_decode(r)['scheduled'] as List?) ?? [];
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> getUserByUsername(String username) async {
+    final r = await _get('/user/${Uri.encodeComponent(username)}', auth: true);
+    if (r.statusCode != 200) throw ApiException('User not found');
+    final body = _decode(r);
+    return (body['user'] as Map<String, dynamic>?) ?? body;
+  }
 
   // ── Global Search ─────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> globalSearch(String q) async {
@@ -972,7 +1194,8 @@ class Api {
   /// belong to a MarketHouse account. Body: `{"contacts":[{"name","phone"}]}`
   static Future<Map<String, dynamic>> syncContacts(
       List<Map<String, dynamic>> contacts) async {
-    final r = await _post('/contacts/sync', body: {'contacts': contacts}, auth: true);
+    final r =
+        await _post('/contacts/sync', body: {'contacts': contacts}, auth: true);
     return _decode(r);
   }
 
@@ -981,7 +1204,8 @@ class Api {
     return r.statusCode == 200 ? _decode(r) : {};
   }
 
-  static Future<Map<String, dynamic>> setContactSyncEnabled(bool enabled) async {
+  static Future<Map<String, dynamic>> setContactSyncEnabled(
+      bool enabled) async {
     final r = await _put('/settings/contacts',
         body: {'contact_sync_enabled': enabled}, auth: true);
     return _decode(r);
@@ -1092,15 +1316,23 @@ class Api {
   /// [near] pass true (with the user's current position already synced via
   /// LocationService) to sort/filter by distance instead of recency.
   static Future<List<dynamic>> getCommerceListings(String type,
-      {double? lat, double? lng, double radiusKm = 0}) async {
+      {double? lat, double? lng, double radiusKm = 0, String? category}) async {
     var path = '/commerce?type=$type';
     if (lat != null && lng != null) {
       path += '&lat=$lat&lng=$lng';
       if (radiusKm > 0) path += '&radius_km=$radiusKm';
     }
+    if (category != null && category.isNotEmpty)
+      path += '&category=${Uri.encodeComponent(category)}';
     final r = await _get(path, auth: true);
     if (r.statusCode != 200) return [];
     return (_decode(r)['listings'] as List?) ?? [];
+  }
+
+  static Future<Map<String, dynamic>?> getCommerceListingById(int id) async {
+    final r = await _get('/commerce/$id', auth: true);
+    if (r.statusCode != 200) return null;
+    return _decode(r);
   }
 
   /// vote: 1 = thumbs up, -1 = thumbs down, 0 = clear my vote.
@@ -1121,6 +1353,16 @@ class Api {
     'Wrong category',
     'Offensive content',
     'Spam or duplicate',
+    'Other',
+  ];
+
+  static const kCommunityReportReasons = [
+    'Spam or scam',
+    'Harassment or bullying',
+    'Hate speech',
+    'Offensive content',
+    'Misinformation',
+    'Impersonation',
     'Other',
   ];
 
@@ -1162,18 +1404,18 @@ class Api {
   }
 
   static Future<void> createCommunity(
-          {required String name,
-          required String slug,
-          required String description,
-          required String visibility,
-          String username = '',
-          String rules = '',
-          String category = '',
-          List<String> tags = const [],
-          String icon = '',
-          String coverPhoto = '',
-          bool marketplaceEnabled = false,
-          List<int> invitedUserIds = const []}) async {
+      {required String name,
+      required String slug,
+      required String description,
+      required String visibility,
+      String username = '',
+      String rules = '',
+      String category = '',
+      List<String> tags = const [],
+      String icon = '',
+      String coverPhoto = '',
+      bool marketplaceEnabled = false,
+      List<int> invitedUserIds = const []}) async {
     final r = await _post('/community',
         body: {
           'name': name,
@@ -1247,11 +1489,135 @@ class Api {
   }
 
   static Future<Map<String, dynamic>> sendCommunityMessage(int communityId,
-      {String body = '', String mediaUrl = '', String mediaType = ''}) async {
+      {String body = '',
+      String mediaUrl = '',
+      String mediaType = '',
+      int replyTo = 0}) async {
     final r = await _post('/community/$communityId/messages',
-        body: {'body': body, 'media_url': mediaUrl, 'media_type': mediaType},
+        body: {
+          'body': body,
+          'media_url': mediaUrl,
+          'media_type': mediaType,
+          if (replyTo > 0) 'reply_to': replyTo,
+        },
         auth: true);
+    final data = _decode(r);
+    if (r.statusCode != 200) {
+      // e.g. slow mode rejection — the server's message is user-friendly.
+      throw ApiException(
+          (data['error'] as String?) ?? 'Could not send (${r.statusCode})');
+    }
+    return data;
+  }
+
+  /// User ids of community members currently connected via websocket.
+  static Future<List<int>> getCommunityOnline(int communityId) async {
+    try {
+      final r = await _get('/community/$communityId/online', auth: true);
+      if (r.statusCode != 200) return [];
+      final list = (_decode(r)['online'] as List?) ?? [];
+      return list.map((e) => (e as num).toInt()).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Owner/admin only — 0 turns slow mode off.
+  static Future<void> setCommunitySlowmode(int communityId, int seconds) async {
+    final r = await _put('/community/$communityId/settings',
+        body: {'slowmode_seconds': seconds}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not update slow mode (${r.statusCode})');
+    }
+  }
+
+  // ── Community chat: reactions / auto-mod / titles / ownership ────────────────
+
+  /// Toggles [emoji] on a message; returns the fresh [{emoji,count,mine}] list.
+  static Future<List<Map<String, dynamic>>> reactCommunityMessage(
+      int communityId, int messageId, String emoji) async {
+    final r = await _post('/community/$communityId/messages/$messageId/react',
+        body: {'emoji': emoji}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException('Could not react (${r.statusCode})');
+    }
+    return ((_decode(r)['reactions'] as List?) ?? [])
+        .cast<Map<String, dynamic>>();
+  }
+
+  /// Returns the list of users who reacted with [emoji] on a community message.
+  static Future<List<Map<String, dynamic>>> communityReactionUsers(
+      int communityId, int messageId, String emoji) async {
+    final encEmoji = Uri.encodeComponent(emoji);
+    final r = await _get(
+        '/community/$communityId/messages/$messageId/reactions/$encEmoji',
+        auth: true);
+    if (r.statusCode != 200) return [];
+    return ((_decode(r)['users'] as List?) ?? []).cast<Map<String, dynamic>>();
+  }
+
+  /// Auto-mod — blockLinks toggles link blocking; words is a comma list
+  /// (pass null to leave unchanged).
+  static Future<void> setCommunityAutomod(int communityId,
+      {bool? blockLinks, String? words}) async {
+    final body = <String, dynamic>{
+      if (blockLinks != null) 'automod_block_links': blockLinks,
+      if (words != null) 'automod_words': words,
+    };
+    final r =
+        await _put('/community/$communityId/settings', body: body, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException('Could not save auto-mod rules (${r.statusCode})');
+    }
+  }
+
+  /// Owner/admin only. Empty title clears it.
+  static Future<void> setCommunityTitle(
+      int communityId, int userId, String title) async {
+    final r = await _post('/community/$communityId/title',
+        body: {'user_id': userId, 'title': title}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(
+          (_decode(r)['error'] as String?) ?? 'Could not set title');
+    }
+  }
+
+  /// Owner only — hands the crown over; old owner stays admin.
+  static Future<void> transferCommunityOwnership(
+      int communityId, int userId) async {
+    final r = await _post('/community/$communityId/transfer',
+        body: {'user_id': userId}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(
+          (_decode(r)['error'] as String?) ?? 'Could not transfer ownership');
+    }
+  }
+
+  /// {code, invited, bonus_per_invite}
+  static Future<Map<String, dynamic>> getMyReferral() async {
+    final r = await _get('/me/referral', auth: true);
     return _decode(r);
+  }
+
+  static Future<void> editCommunityMessage(int communityId, int messageId,
+      {required String body}) async {
+    final r = await _put('/community/$communityId/messages/$messageId',
+        body: {'body': body}, auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not edit message (${r.statusCode})');
+    }
+  }
+
+  static Future<void> deleteCommunityMessage(
+      int communityId, int messageId) async {
+    final r = await _delete('/community/$communityId/messages/$messageId',
+        auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException((_decode(r)['error'] as String?) ??
+          'Could not delete message (${r.statusCode})');
+    }
   }
 
   static Future<bool> canCallInCommunity(int communityId) async {
@@ -1323,9 +1689,13 @@ class Api {
   // (see /wallet, /orders/... — used by wallet.dart) and Supply & Demand
   // purchases should go through that once its schema is fixed, rather than
   // getting a second wallet. See the summary for details.
-  static Future<Map<String, dynamic>> getSupplyDemandListings(
-      String kind) async {
-    final r = await _get('/supply-demand?kind=$kind', auth: true);
+  static Future<Map<String, dynamic>> getSupplyDemandListings(String kind,
+      {double? lat, double? lng, double? radiusKm}) async {
+    var url = '/supply-demand?kind=$kind';
+    if (lat != null && lng != null) {
+      url += '&lat=$lat&lng=$lng&radius_km=${radiusKm ?? 50}';
+    }
+    final r = await _get(url, auth: true);
     if (r.statusCode != 200) return {'listings': [], 'tagline': ''};
     return _decode(r);
   }
@@ -1335,8 +1705,17 @@ class Api {
     required String title,
     String description = '',
     double price = 0,
+    double minPrice = 0,
+    double maxPrice = 0,
+    bool negotiable = false,
     String category = '',
+    String condition = '',
+    int quantity = 1,
     List<String> images = const [],
+    String locationText = '',
+    double? lat,
+    double? lng,
+    int radiusKm = 5,
   }) async {
     final r = await _post('/supply-demand',
         body: {
@@ -1344,8 +1723,17 @@ class Api {
           'title': title,
           'description': description,
           'price': price,
+          'min_price': minPrice,
+          'max_price': maxPrice,
+          'negotiable': negotiable,
           'category': category,
+          'condition': condition,
+          'quantity': quantity,
           'images': images,
+          'location_text': locationText,
+          if (lat != null) 'lat': lat,
+          if (lng != null) 'lng': lng,
+          'radius_km': radiusKm,
         },
         auth: true);
     if (r.statusCode != 200) {
@@ -1353,9 +1741,6 @@ class Api {
     }
   }
 
-  /// "Add to cart" for now just pings the buyer's own reminder ("pay before
-  /// it's taken") — no cart is persisted server-side until checkout is wired
-  /// to the existing escrow/wallet system.
   static Future<void> expressSdInterest(int listingId) async {
     final r = await _post('/supply-demand/$listingId/interest', auth: true);
     if (r.statusCode != 200) {
@@ -1363,16 +1748,137 @@ class Api {
     }
   }
 
+  static Future<void> updateSupplyDemandListing(
+    int id, {
+    required String title,
+    String description = '',
+    double price = 0,
+    double minPrice = 0,
+    double maxPrice = 0,
+    bool negotiable = false,
+    String category = '',
+    String condition = '',
+    int quantity = 1,
+    List<String> images = const [],
+    String locationText = '',
+    double? lat,
+    double? lng,
+    int radiusKm = 5,
+  }) async {
+    final r = await _put('/supply-demand/$id',
+        body: {
+          'title': title,
+          'description': description,
+          'price': price,
+          'min_price': minPrice,
+          'max_price': maxPrice,
+          'negotiable': negotiable,
+          'category': category,
+          'condition': condition,
+          'quantity': quantity,
+          'images': images,
+          'location_text': locationText,
+          if (lat != null) 'lat': lat,
+          if (lng != null) 'lng': lng,
+          'radius_km': radiusKm,
+        },
+        auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error'] ?? 'Could not update');
+    }
+  }
+
+  static Future<void> deleteSupplyDemandListing(int id) async {
+    final r = await _delete('/supply-demand/$id', auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error'] ?? 'Could not delete');
+    }
+  }
+
+  static Future<Map<String, dynamic>> getMySupplyDemandListings(
+      {String kind = ''}) async {
+    var url = '/supply-demand/mine';
+    if (kind.isNotEmpty) url += '?kind=$kind';
+    final r = await _get(url, auth: true);
+    if (r.statusCode != 200) return {'listings': []};
+    return _decode(r);
+  }
+
+  static Future<Map<String, dynamic>> getNearbySuppliers({
+    required double lat,
+    required double lng,
+    String category = '',
+  }) async {
+    var url = '/supply-demand/nearby-suppliers?lat=$lat&lng=$lng';
+    if (category.isNotEmpty) url += '&category=$category';
+    final r = await _get(url, auth: true);
+    if (r.statusCode != 200) return {'suppliers': []};
+    return _decode(r);
+  }
+
+  static Future<Map<String, dynamic>> getSupplierPreferences() async {
+    final r = await _get('/supplier-preferences', auth: true);
+    if (r.statusCode != 200) {
+      return {'categories': [], 'supply_radius_km': 10, 'is_active': false};
+    }
+    return _decode(r);
+  }
+
+  static Future<void> saveSupplierPreferences({
+    required List<String> categories,
+    int supplyRadiusKm = 10,
+    bool isActive = true,
+  }) async {
+    final r = await _put('/supplier-preferences',
+        body: {
+          'categories': categories,
+          'supply_radius_km': supplyRadiusKm,
+          'is_active': isActive,
+        },
+        auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error'] ?? 'Could not save');
+    }
+  }
+
+  static Future<int> postAskAround({
+    required String title,
+    String description = '',
+    String category = '',
+    double budget = 0,
+    String locationText = '',
+    double? lat,
+    double? lng,
+    int radiusKm = 10,
+  }) async {
+    final r = await _post('/supply-demand/ask-around',
+        body: {
+          'title': title,
+          'description': description,
+          'category': category,
+          'budget': budget,
+          'location_text': locationText,
+          if (lat != null) 'lat': lat,
+          if (lng != null) 'lng': lng,
+          'radius_km': radiusKm,
+        },
+        auth: true);
+    if (r.statusCode != 200) {
+      throw ApiException(_decode(r)['error'] ?? 'Could not post');
+    }
+    return _decode(r)['id'] ?? 0;
+  }
+
   static Future<void> createCommunityPostFull(int communityId,
-          {required String title,
-          required String body,
-          required String postType,
-          String mediaUrl = '',
-          String linkUrl = '',
-          List<String> pollOptions = const [],
-          int pollDurationHours = 24,
-          bool pollMultiple = false,
-          bool pollAnonymous = false}) async {
+      {required String title,
+      required String body,
+      required String postType,
+      String mediaUrl = '',
+      String linkUrl = '',
+      List<String> pollOptions = const [],
+      int pollDurationHours = 24,
+      bool pollMultiple = false,
+      bool pollAnonymous = false}) async {
     final r = await _post('/community/$communityId/post',
         body: {
           'title': title,
@@ -1448,6 +1954,30 @@ class Api {
   static Future<void> markNotificationsRead() async =>
       _post('/notifications/read', auth: true);
 
+  static Future<int> getUnreadNotificationCount() async {
+    final r = await _get('/notifications/unread-count', auth: true);
+    if (r.statusCode != 200) return 0;
+    return (_decode(r)['unread'] as num?)?.toInt() ?? 0;
+  }
+
+  static Future<Map<String, dynamic>> getNotificationPrefs() async {
+    final r = await _get('/notifications/prefs', auth: true);
+    if (r.statusCode != 200) return {};
+    final d = _decode(r);
+    return Map<String, dynamic>.from(d);
+  }
+
+  static Future<void> updateNotificationPrefs(
+      Map<String, dynamic> prefs) async {
+    await _put('/notifications/prefs', body: prefs, auth: true);
+  }
+
+  static Future<void> registerDeviceToken(String token,
+      [String platform = 'android']) async {
+    await _post('/device/register',
+        body: {'token': token, 'platform': platform}, auth: true);
+  }
+
   static Future<List<dynamic>> getStatuses() async {
     final r = await _get('/statuses', auth: true);
     if (r.statusCode != 200) return [];
@@ -1458,18 +1988,45 @@ class Api {
           {required String type,
           String? mediaUrl,
           String? textContent,
-          String? bgColor}) async =>
+          String? bgColor,
+          String privacy = 'followers',
+          String customIds = '',
+          int? resharedFrom}) async =>
       _post('/status',
           body: {
             'type': type,
+            'privacy': privacy,
             if (mediaUrl != null) 'media_url': mediaUrl,
             if (textContent != null) 'text_content': textContent,
-            if (bgColor != null) 'bg_color': bgColor
+            if (bgColor != null) 'bg_color': bgColor,
+            if (customIds.isNotEmpty) 'custom_ids': customIds,
+            if (resharedFrom != null && resharedFrom > 0)
+              'reshared_from': resharedFrom
           },
           auth: true);
 
+  /// Reshare-credit privacy: when true my name is hidden on other people's
+  /// reshares of my statuses (shown as @anonymous). Credit is ON by default.
+  static Future<bool> getHideStatusCredit() async {
+    final r = await _get('/user/hide-status-credit', auth: true);
+    return r.statusCode == 200 && _decode(r)['hide'] == true;
+  }
+
+  static Future<void> setHideStatusCredit(bool hide) async =>
+      _put('/user/hide-status-credit', body: {'hide': hide}, auth: true);
+
   static Future<void> viewStatusById(int id) async =>
       _post('/status/$id/view', auth: true);
+
+  /// Who watched my status — one row per account, newest first.
+  static Future<List<dynamic>> statusViewers(int id) async {
+    final r = await _get('/status/$id/views', auth: true);
+    if (r.statusCode != 200) return [];
+    return (_decode(r)['viewers'] as List?) ?? [];
+  }
+
+  static Future<void> deleteStatus(int id) async =>
+      _delete('/status/$id', auth: true);
 
   static Future<Map<String, dynamic>> upgradeToBusiness(
       Map<String, dynamic> data) async {

@@ -21,8 +21,6 @@ class ChatList extends StatefulWidget {
 
 class _ChatListState extends State<ChatList> {
   String _filter = 'All';
-  String _searchQuery = '';
-  final _searchCtl = TextEditingController();
   Map<int, List<Map>> _statusByUser = {};
 
   @override
@@ -72,6 +70,14 @@ class _ChatListState extends State<ChatList> {
         backgroundColor: dk ? const Color(0xFF1C1C1E) : Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            color: dk ? C.textD : C.textL,
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const _ChatSearchScreen()));
+            },
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded),
             color: dk ? C.surfD : Colors.white,
@@ -113,45 +119,11 @@ class _ChatListState extends State<ChatList> {
             default:
               convs = active.toList();
           }
-          if (_searchQuery.isNotEmpty) {
-            final q = _searchQuery.toLowerCase();
-            convs = convs.where((c) =>
-              (c.otherUser.username ?? '').toLowerCase().contains(q) ||
-              (c.otherUser.fullName ?? '').toLowerCase().contains(q) ||
-              (c.lastMessage ?? '').toLowerCase().contains(q)
-            ).toList();
-          }
           final pinned = convs.where((c) => c.isPinned).toList();
           final regular = convs.where((c) => !c.isPinned).toList();
 
           return Column(
             children: [
-              // Search bar
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: TextField(
-                  controller: _searchCtl,
-                  onChanged: (v) => setState(() => _searchQuery = v.trim()),
-                  decoration: InputDecoration(
-                    hintText: 'Search chats...',
-                    hintStyle: TextStyle(color: dk ? C.subD : C.subL, fontSize: 14),
-                    prefixIcon: Icon(Icons.search_rounded, color: dk ? C.subD : C.subL, size: 20),
-                    suffixIcon: _searchQuery.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.close_rounded, size: 18, color: dk ? C.subD : C.subL),
-                            onPressed: () { _searchCtl.clear(); setState(() => _searchQuery = ''); },
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: dk ? C.surfD : const Color(0xFFF2F2F7),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-              ),
               // Status bar (stories row)
               StatusBar(onChanged: _onStatusesChanged),
               Container(height: 0.5, color: dk ? C.borderD : C.borderL),
@@ -1171,6 +1143,129 @@ class _StatusCreator extends StatelessWidget {
         child: Text('Open status creator...',
             style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color)),
       ),
+    );
+  }
+}
+
+// -- Chat search screen (searches messages across all chats) --
+class _ChatSearchScreen extends StatefulWidget {
+  const _ChatSearchScreen();
+  @override
+  State<_ChatSearchScreen> createState() => _ChatSearchScreenState();
+}
+
+class _ChatSearchScreenState extends State<_ChatSearchScreen> {
+  final _ctl = TextEditingController();
+  List<Map<String, dynamic>> _results = [];
+  bool _loading = false;
+  bool _searched = false;
+
+  Future<void> _search(String q) async {
+    if (q.trim().isEmpty) return;
+    setState(() { _loading = true; _searched = true; });
+    try {
+      final data = await Api.searchMessages(q.trim());
+      if (mounted) setState(() { _results = data; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dk = context.watch<DarkProvider>().isDark;
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: dk ? const Color(0xFF1C1C1E) : Colors.white,
+        elevation: 0,
+        title: TextField(
+          controller: _ctl,
+          autofocus: true,
+          onSubmitted: _search,
+          decoration: InputDecoration(
+            hintText: 'Search messages...',
+            hintStyle: TextStyle(color: dk ? C.subD : C.subL),
+            border: InputBorder.none,
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            onPressed: () => _search(_ctl.text),
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: C.green))
+          : !_searched
+              ? Center(child: Text('Search for messages across all your chats',
+                  style: TextStyle(color: dk ? C.subD : C.subL)))
+              : _results.isEmpty
+                  ? Center(child: Text('No results found',
+                      style: TextStyle(color: dk ? C.subD : C.subL)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _results.length,
+                      itemBuilder: (_, i) {
+                        final m = _results[i];
+                        final senderName = m['sender_name'] as String? ?? 'Unknown';
+                        final senderPhoto = m['sender_photo'] as String? ?? '';
+                        final body = m['body'] as String? ?? '';
+                        final time = m['created_at'] as String? ?? '';
+                        final convId = (m['conversation_id'] as num?)?.toInt() ?? 0;
+                        final receiverName = m['receiver_name'] as String? ?? '';
+
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          leading: CircleAvatar(
+                            radius: 20,
+                            backgroundColor: C.green.withValues(alpha: 0.15),
+                            backgroundImage: senderPhoto.isNotEmpty
+                                ? NetworkImage(Api.resolveUrl(senderPhoto))
+                                : null,
+                            child: senderPhoto.isEmpty
+                                ? Text(senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
+                                    style: const TextStyle(color: C.green, fontWeight: FontWeight.w700))
+                                : null,
+                          ),
+                          title: RichText(
+                            text: TextSpan(children: [
+                              TextSpan(text: senderName,
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                                      color: dk ? C.textD : C.textL)),
+                              if (receiverName.isNotEmpty) ...[
+                                const TextSpan(text: ' → '),
+                                TextSpan(text: receiverName,
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+                                        color: dk ? C.subD : C.subL)),
+                              ],
+                            ]),
+                          ),
+                          subtitle: Text(body, maxLines: 2, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+                          trailing: Text(time.length > 10 ? time.substring(0, 10) : time,
+                              style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL)),
+                          onTap: () {
+                            if (convId > 0) {
+                              Navigator.push(context, MaterialPageRoute(
+                                  builder: (_) => ChatWindow(
+                                    conv: Conversation(
+                                      id: convId,
+                                      otherUser: ChatUser(
+                                        id: 0,
+                                        username: '',
+                                        fullName: senderName,
+                                        profilePhoto: senderPhoto,
+                                      ),
+                                      lastMessage: '',
+                                      lastTime: '',
+                                    ),
+                                  )));
+                            }
+                          },
+                        );
+                      },
+                    ),
     );
   }
 }
