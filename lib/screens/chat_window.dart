@@ -2348,14 +2348,7 @@ class _ChatWindowState extends State<ChatWindow> {
           return Column(children: [_buildUnreadDivider(dk), row]);
         }
         if (item is String) return row;
-        return Column(mainAxisSize: MainAxisSize.min, children: [
-          row,
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Divider(height: 1, thickness: 0.5,
-                color: dk ? Colors.white24 : Colors.black12),
-          ),
-        ]);
+        return row;
       },
     );
   }
