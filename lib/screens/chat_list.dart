@@ -216,20 +216,28 @@ class _ChatListState extends State<ChatList> {
                                               color: dk ? C.subD : C.subL,
                                               letterSpacing: 1)),
                                     ),
-                                    ...pinned.map((c) => _ChatTile(
+                                    ...pinned.expand((c) => [
+                                      _ChatTile(
+                                          conv: c,
+                                          dk: dk,
+                                          statusItems:
+                                              _statusByUser[c.otherUser.id],
+                                          onStatusWatched: _onStatusesChanged),
+                                      Divider(
+                                          indent: 20, endIndent: 20, height: 1,
+                                          color: dk ? Colors.white10 : Colors.black12),
+                                    ]),
+                                  ],
+                                  ...regular.expand((c) => [
+                                    _ChatTile(
                                         conv: c,
                                         dk: dk,
-                                        statusItems:
-                                            _statusByUser[c.otherUser.id],
-                                        onStatusWatched: _onStatusesChanged)),
-                                    const Divider(
-                                        indent: 20, endIndent: 20, height: 8),
-                                  ],
-                                  ...regular.map((c) => _ChatTile(
-                                      conv: c,
-                                      dk: dk,
-                                      statusItems: _statusByUser[c.otherUser.id],
-                                      onStatusWatched: _onStatusesChanged)),
+                                        statusItems: _statusByUser[c.otherUser.id],
+                                        onStatusWatched: _onStatusesChanged),
+                                    Divider(
+                                        indent: 20, endIndent: 20, height: 1,
+                                        color: dk ? Colors.white10 : Colors.black12),
+                                  ]),
                                 ],
                               ),
                       ),

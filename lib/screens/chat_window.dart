@@ -555,6 +555,7 @@ class _ChatWindowState extends State<ChatWindow> {
         _replyingTo = null;
         _sending = false;
       });
+      ChatProvider.instance.refresh();
       await _reload();
     } catch (e) {
       if (mounted) {
@@ -3260,6 +3261,37 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final align =
         msg.isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+
+    // Deleted messages show a dustbin icon + placeholder text
+    if (msg.messageType == 'deleted') {
+      return Container(
+        width: double.infinity,
+        alignment: msg.isMine ? Alignment.centerRight : Alignment.centerLeft,
+        padding: EdgeInsets.only(
+            top: 2, bottom: 2,
+            left: msg.isMine ? 56 : 0,
+            right: msg.isMine ? 0 : 56),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: dk ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.delete_outline_rounded, size: 14,
+                  color: dk ? C.subD : C.subL),
+              const SizedBox(width: 6),
+              Text('This message was deleted',
+                  style: TextStyle(fontSize: fontSize,
+                      fontStyle: FontStyle.italic,
+                      color: dk ? C.subD : C.subL)),
+            ],
+          ),
+        ),
+      );
+    }
 
     // Stickers float free — no bubble chrome.
     if (msg.isSticker) {
