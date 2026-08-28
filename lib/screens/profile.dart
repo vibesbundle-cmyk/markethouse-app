@@ -1,8 +1,7 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -10,7 +9,9 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/safe_file.dart';
 import '../widgets/bits.dart' show CountryCodePhoneField, splitPhoneForEditing;
+import '../widgets/in_app_gallery_picker.dart';
 import '../widgets/location_picker.dart';
+import '../widgets/media_editor.dart';
 import '../widgets/location_map.dart';
 import '../services/location_service.dart';
 import '../theme/colors.dart';
@@ -18,11 +19,13 @@ import '../theme/dark.dart';
 import '../theme/state.dart';
 import '../models/user.dart';
 import '../services/api.dart';
-import '../utils/image_crop_utils.dart';
+import 'orders.dart';
+import '../services/app_storage.dart';
+import '../services/ws_service.dart';
 import '../utils/crop_screen.dart';
 import 'public.dart';
-import 'demand.dart';
-import 'shop.dart';
+import 'demand_hub.dart';
+import 'commerce.dart';
 import 'wallet.dart';
 import 'notifications.dart';
 import 'settings.dart';
@@ -31,16 +34,119 @@ import 'post_swipe_viewer.dart';
 /// Opens the shared photo-post creator (used from the Profile FAB and the
 /// Home feed toolbar so both entry points match exactly).
 Future<void> showPostCreator(BuildContext context) async {
-  await showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => ConstrainedBox(
-      constraints:
-          BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
-      child: const _PostCreatorSheet(),
-    ),
-  );
+  final isBusiness = context.read<AppState>().user?.isBusiness ?? false;
+
+  if (isBusiness) {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _PostTypeChooser(dk: context.read<DarkProvider>().isDark),
+    );
+    if (choice == null) return;
+    if (choice == 'product' || choice == 'service' || choice == 'job') {
+      await Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const Commerce()));
+      return;
+    }
+  }
+
+  await Navigator.push(context,
+    MaterialPageRoute(builder: (_) => const _PostCreatorPage()));
+}
+
+class _PostTypeChooser extends StatelessWidget {
+  final bool dk;
+  const _PostTypeChooser({required this.dk});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: dk ? C.surfD : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: dk ? C.borderD : C.borderL, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 20),
+            Text('What do you want to post?',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: dk ? Colors.white : const Color(0xFF1C1C1E))),
+            const SizedBox(height: 20),
+            _PostTypeOption(
+              icon: Icons.article_outlined,
+              title: 'Normal Post',
+              subtitle: 'Share a photo, video or update',
+              dk: dk,
+              onTap: () => Navigator.pop(context, 'normal'),
+            ),
+            const SizedBox(height: 10),
+            _PostTypeOption(
+              icon: Icons.inventory_2_outlined,
+              title: 'Product',
+              subtitle: 'List a product for sale on Commerce',
+              dk: dk,
+              onTap: () => Navigator.pop(context, 'product'),
+            ),
+            const SizedBox(height: 10),
+            _PostTypeOption(
+              icon: Icons.design_services_outlined,
+              title: 'Service',
+              subtitle: 'Offer a service on Commerce',
+              dk: dk,
+              onTap: () => Navigator.pop(context, 'service'),
+            ),
+            const SizedBox(height: 10),
+            _PostTypeOption(
+              icon: Icons.work_outline_rounded,
+              title: 'Job',
+              subtitle: 'Post a job listing on Commerce',
+              dk: dk,
+              onTap: () => Navigator.pop(context, 'job'),
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _PostTypeOption extends StatelessWidget {
+  final IconData icon;
+  final String title, subtitle;
+  final bool dk;
+  final VoidCallback onTap;
+  const _PostTypeOption({required this.icon, required this.title, required this.subtitle, required this.dk, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: dk ? C.surf2D : const Color(0xFFF7F7FA),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: dk ? C.borderD : const Color(0xFFE5E5EA)),
+        ),
+        child: Row(children: [
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(color: C.green.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: C.green, size: 22)),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: dk ? Colors.white : const Color(0xFF1C1C1E))),
+            const SizedBox(height: 2),
+            Text(subtitle, style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+          ])),
+          Icon(Icons.arrow_forward_ios_rounded, size: 16, color: dk ? C.subD : C.subL),
+        ]),
+      ),
+    );
+  }
 }
 
 // ── Slim user model ──────────────────────────────────────────────────────────
@@ -72,49 +178,55 @@ class _SlimUser {
   }
 }
 
-// ── Post Creator Sheet (must be in this file) ──────────────────────────────────
-enum _PostStep { pick, edit, caption }
+// ── Post Creator Page (full-screen) ─────────────────────────────────────────
+enum _PostStep { pick, caption }
 
-class _PostCreatorSheet extends StatefulWidget {
-  const _PostCreatorSheet();
-  @override
-  State<_PostCreatorSheet> createState() => _PostCreatorSheetState();
+class _PostMedia {
+  final XFile file;
+  XFile? edited;
+  _PostMedia(this.file);
+  bool get isVideo {
+    final e = file.path.toLowerCase();
+    return e.endsWith('.mp4') ||
+        e.endsWith('.mov') ||
+        e.endsWith('.m4v') ||
+        e.endsWith('.3gp') ||
+        e.endsWith('.webm') ||
+        e.endsWith('.mkv') ||
+        e.endsWith('.avi') ||
+        e.endsWith('.wmv');
+  }
+
+  XFile get upload => edited ?? file;
 }
 
-class _PostCreatorSheetState extends State<_PostCreatorSheet>
-    with TickerProviderStateMixin {
+class _PostCreatorPage extends StatefulWidget {
+  const _PostCreatorPage();
+  @override
+  State<_PostCreatorPage> createState() => _PostCreatorPageState();
+}
+
+class _PostCreatorPageState extends State<_PostCreatorPage> {
   _PostStep _step = _PostStep.pick;
-  XFile? _picked;
-  String? _croppedPath;
-  List<XFile> _multiFiles = [];
-  double _imageAspectRatio = 1; // updated to the real photo's ratio once decoded — no forced square crop
-  late TabController _editTab;
-  int _filterIdx = 0;
-  String _textOverlay = '';
-  Offset _textOffset = const Offset(0.5, 0.5);
-  int _fontIdx = 0;
-  static const _fonts = ['Default', 'Serif', 'Mono', 'Cursive', 'Impact'];
-  static const _fontFamilies = [null, 'Georgia', 'Courier', 'Pacifico', null];
-  final _strokes = <List<Offset>>[];
-  List<Offset>? _currentStroke;
-  Color _brushColor = Colors.redAccent;
-  double _brushSize = 4;
-  static const _brushColors = [
-    Colors.redAccent,
-    Colors.orange,
-    Colors.yellow,
-    Colors.greenAccent,
-    Colors.blueAccent,
-    Colors.purpleAccent,
-    Colors.white,
-    Colors.black
-  ];
+  final List<_PostMedia> _media = [];
   final _captionCtl = TextEditingController();
   List<_SlimUser> _taggedUsers = [];
+  String _location = '';
+  double? _lat;
+  double? _lng;
+  String _audience = 'everyone';
+  List<_SlimUser> _audienceUsers = [];
   bool _posting = false;
-  bool _flattening = false;
-  bool _isVideo = false;
-  final GlobalKey _editPreviewKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    // Straight into the in-app gallery — same behaviour as chat and
+    // community posts. No intermediate "tap to choose" screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pick();
+    });
+  }
 
   // ── Business-account product fields ──────────────────────────────────────
   // Business accounts post products (with price/stock/etc.) instead of a
@@ -134,62 +246,8 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
     'Other'
   ];
 
-  static const _filterNames = [
-    'Original',
-    'Mono',
-    'Warm',
-    'Cool',
-    'Vivid',
-    'Fade'
-  ];
-  static final _filterMatrices = <List<double>?>[
-    null, // Original — no filter
-    <double>[
-      // Mono (grayscale)
-      0.33, 0.33, 0.33, 0, 0,
-      0.33, 0.33, 0.33, 0, 0,
-      0.33, 0.33, 0.33, 0, 0,
-      0, 0, 0, 1, 0,
-    ],
-    <double>[
-      // Warm
-      1.15, 0, 0, 0, 12,
-      0, 1.05, 0, 0, 4,
-      0, 0, 0.9, 0, 0,
-      0, 0, 0, 1, 0,
-    ],
-    <double>[
-      // Cool
-      0.9, 0, 0, 0, 0,
-      0, 1.0, 0, 0, 4,
-      0, 0, 1.18, 0, 12,
-      0, 0, 0, 1, 0,
-    ],
-    <double>[
-      // Vivid (boosted saturation/contrast)
-      1.3, -0.15, -0.15, 0, 4,
-      -0.15, 1.3, -0.15, 0, 4,
-      -0.15, -0.15, 1.3, 0, 4,
-      0, 0, 0, 1, 0,
-    ],
-    <double>[
-      // Fade (washed out)
-      0.85, 0.07, 0.07, 0, 28,
-      0.07, 0.85, 0.07, 0, 28,
-      0.07, 0.07, 0.85, 0, 28,
-      0, 0, 0, 1, 0,
-    ],
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _editTab = TabController(length: 3, vsync: this);
-  }
-
   @override
   void dispose() {
-    _editTab.dispose();
     _captionCtl.dispose();
     _productNameCtl.dispose();
     _priceCtl.dispose();
@@ -199,185 +257,54 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
   }
 
   Future<void> _pick() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final dk = ctx.read<DarkProvider>().isDark;
-        return SafeArea(
-          child: Container(
-            margin: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-                color: dk ? C.surfD : Colors.white,
-                borderRadius: BorderRadius.circular(16)),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ListTile(
-                leading: const Icon(Icons.photo_library_rounded, color: C.green),
-                title: Text('Photos & Videos (multiple)',
-                    style: TextStyle(
-                        color: dk ? C.textD : C.textL,
-                        fontWeight: FontWeight.w600)),
-                subtitle: Text('Pick several — mixed photos and videos are fine',
-                    style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
-                onTap: () => Navigator.pop(ctx, 'multi'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_outlined, color: C.green),
-                title: Text('Photo',
-                    style: TextStyle(
-                        color: dk ? C.textD : C.textL,
-                        fontWeight: FontWeight.w600)),
-                onTap: () => Navigator.pop(ctx, 'photo'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.videocam_outlined, color: C.green),
-                title: Text('Video',
-                    style: TextStyle(
-                        color: dk ? C.textD : C.textL,
-                        fontWeight: FontWeight.w600)),
-                onTap: () => Navigator.pop(ctx, 'video'),
-              ),
-              const SizedBox(height: 6),
-            ]),
-          ),
-        );
-      },
-    );
-    if (choice == null || !mounted) return;
-
-    final picker = ImagePicker();
-    if (choice == 'multi') {
-      final files = await picker.pickMultipleMedia(imageQuality: 90);
-      if (files.isEmpty || !mounted) return;
-      setState(() {
-        _multiFiles = files;
-        _picked = null;
-        _croppedPath = null;
-        _step = _PostStep.caption;
-      });
-      return;
-    }
-    if (choice == 'video') {
-      final f = await picker.pickVideo(source: ImageSource.gallery);
-      if (f == null || !mounted) return;
-      setState(() {
-        _picked = f;
-        _croppedPath = f.path;
-        _isVideo = true;
-        _multiFiles = [];
-        _step = _PostStep.caption;
-      });
-      return;
-    }
-
-    final f =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
-    if (f == null || !mounted) return;
-    setState(() {
-      _picked = f;
-      _croppedPath = f.path; // use the original photo as-is — no forced crop
-      _isVideo = false;
-      _multiFiles = [];
-      _step = _PostStep.edit;
-    });
-    _detectAspectRatio(f.path);
-  }
-
-  Future<void> _detectAspectRatio(String path) async {
-    try {
-      final bytes = await XFile(path).readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final ratio = frame.image.width / frame.image.height;
-      if (mounted) setState(() => _imageAspectRatio = ratio);
-    } catch (_) {
-      // Keep whatever ratio we already had rather than blocking the editor.
-    }
-  }
-
-  Future<void> _confirmEdit() async {
-    final hasEdits = _filterIdx != 0 || _textOverlay.trim().isNotEmpty || _strokes.isNotEmpty;
-    if (!hasEdits) {
-      // Nothing was actually changed — keep the original file as-is instead
-      // of re-encoding it through a screenshot (avoids quality loss / bloat).
-      setState(() => _step = _PostStep.caption);
-      return;
-    }
-    setState(() => _flattening = true);
-    try {
-      // On web we can't write temp files to disk; keep the original picked
-      // image as-is (the photo still posts, just without the on-canvas edits).
-      if (kIsWeb) {
-        setState(() {
-          _flattening = false;
-          _step = _PostStep.caption;
-        });
-        return;
-      }
-      final boundary = _editPreviewKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
-      if (boundary != null) {
-        final image = await boundary.toImage(pixelRatio: 2.0);
-        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-        if (bytes != null) {
-          final file = File(
-              '${Directory.systemTemp.path}/mh_edit_${DateTime.now().millisecondsSinceEpoch}.png');
-          await file.writeAsBytes(bytes.buffer.asUint8List());
-          _croppedPath = file.path;
-        }
-      }
-    } catch (_) {
-      // If flattening fails, fall back to the cropped (unedited) image
-      // rather than blocking the user from posting.
-    }
+    // Unified in-app gallery: all photos & videos compiled newest-first, with
+    // All / Photos / Videos filters and folder browsing — no image/video ask.
+    final files = await pickImagesInApp(context, maxImages: 10, allowVideo: true);
     if (!mounted) return;
+    if (files.isEmpty) {
+      // Cancelled in the gallery — close the creator like chat does.
+      Navigator.pop(context);
+      return;
+    }
     setState(() {
-      _flattening = false;
+      _media
+        ..clear()
+        ..addAll(files.map(_PostMedia.new));
       _step = _PostStep.caption;
     });
   }
 
-  Future<void> _recrop() async {
-    if (_picked == null) return;
-    if (kIsWeb) {
-      // image_cropper's web UI is broken (no working Done button) — use the
-      // custom crop screen. The result is a blob: URL, which fileImage and
-      // XFile.readAsBytes both handle on web.
-      final bytes = await _picked!.readAsBytes();
-      if (!mounted) return;
-      final croppedBytes = await Navigator.of(context).push<Uint8List>(
-        MaterialPageRoute(
-          builder: (_) => CropScreen(
-            bytes: bytes,
-            shape: CropShape.rect,
-            aspectRatio: _imageAspectRatio,
-          ),
-        ),
-      );
-      if (croppedBytes == null || !mounted) return;
-      final x = XFile.fromData(croppedBytes,
-          name: 'cropped.png', mimeType: 'image/png');
-      setState(() => _croppedPath = x.path);
-      _detectAspectRatio(x.path);
-      return;
-    }
-    final dk = context.read<DarkProvider>().isDark;
-    final cropped = await ImageCropper().cropImage(
-      sourcePath: _picked!.path,
-      uiSettings: ImageCropUtils.getAllSettings(dk, context),
-    );
-    if (cropped == null || !mounted) return;
-    setState(() => _croppedPath = cropped.path);
-    _detectAspectRatio(cropped.path);
+  Future<void> _editMedia(_PostMedia m) async {
+    final edited = await editMediaImage(context, image: m.upload);
+    if (edited == null || !mounted) return;
+    setState(() => m.edited = edited);
+  }
+
+  Future<void> _pickLocation() async {
+    final ll = await pickLocationOnMap(context);
+    if (ll == null || !mounted) return;
+    final name = (await LocationService().resolveAddress(
+            ll.latitude, ll.longitude)) ??
+        '';
+    if (!mounted) return;
+    setState(() {
+      _location = name.isEmpty ? '${ll.latitude}, ${ll.longitude}' : name;
+      _lat = ll.latitude;
+      _lng = ll.longitude;
+    });
   }
 
   Future<void> _post() async {
-    if (_croppedPath == null && _multiFiles.isEmpty) return;
+    if (_media.isEmpty) return;
     final ap = context.read<AppState>();
     final isBusiness = ap.user?.isBusiness ?? false;
-    final files = _multiFiles.isNotEmpty
-        ? _multiFiles
-        : <XFile>[XFile(_croppedPath!, name: _picked?.name ?? 'upload.png')];
+    final files = _media.map((m) => m.upload).toList();
+    final audienceValue = _audience == 'followers'
+        ? 'followers'
+        : _audience == 'select'
+            ? 'private'
+            : 'public';
+    final taggedIds = _taggedUsers.map((u) => u.id).toList();
 
     if (isBusiness) {
       final name = _productNameCtl.text.trim();
@@ -423,12 +350,23 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
 
     setState(() => _posting = true);
     try {
-      if (_multiFiles.isNotEmpty) {
-        await Api.createPostMulti(_captionCtl.text.trim(), files,
-            taggedUserIds: _taggedUsers.map((u) => u.id).toList());
+      final caption = _captionCtl.text.trim();
+      if (files.length == 1 && !_media.first.isVideo) {
+        await Api.createPost(caption, files.first,
+            taggedUserIds: taggedIds,
+            location: _location,
+            latitude: _lat,
+            longitude: _lng,
+            audience: audienceValue,
+            audienceUserIds: _audienceUsers.map((u) => u.id).toList());
       } else {
-        await Api.createPost(_captionCtl.text.trim(), files.first,
-            taggedUserIds: _taggedUsers.map((u) => u.id).toList());
+        await Api.createPostMulti(caption, files,
+            taggedUserIds: taggedIds,
+            location: _location,
+            latitude: _lat,
+            longitude: _lng,
+            audience: audienceValue,
+            audienceUserIds: _audienceUsers.map((u) => u.id).toList());
       }
       if (!mounted) return;
       await ap.fetchProfile();
@@ -453,95 +391,49 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
   Widget build(BuildContext context) {
     final dk = context.watch<DarkProvider>().isDark;
     final isBusiness = context.watch<AppState>().user?.isBusiness ?? false;
-    return Container(
-        decoration: BoxDecoration(
-            color: dk ? C.surfD : C.bgL,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(20))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(height: 10),
-          Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: dk ? C.borderD : C.borderL,
-                  borderRadius: BorderRadius.circular(2))),
-          Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              child: Row(children: [
-                if (_step != _PostStep.pick)
-                  IconButton(
-                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                          size: 18),
-                      color: dk ? C.textD : C.textL,
-                      onPressed: () => setState(() {
-                            _step = (_step == _PostStep.caption &&
-                                    !_isVideo &&
-                                    _multiFiles.isEmpty)
-                                ? _PostStep.edit
-                                : _PostStep.pick;
-                          }))
-                else
-                  IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      color: dk ? C.subD : C.subL,
-                      onPressed: () => Navigator.pop(context)),
-                const Spacer(),
-                Text(
-                    _step == _PostStep.pick
-                        ? (isBusiness ? 'New Product' : 'New Post')
-                        : _step == _PostStep.edit
-                            ? 'Edit'
-                            : (isBusiness ? 'Product Details' : 'Caption'),
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: dk ? C.textD : C.textL)),
-                const Spacer(),
-                if (_step == _PostStep.edit)
-                  (_flattening
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 16),
-                          child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: C.green)))
-                      : TextButton(
-                          onPressed: _confirmEdit,
-                          child: const Text('Next →',
-                              style: TextStyle(
-                                  color: C.green,
-                                  fontWeight: FontWeight.w700))))
-                else if (_step == _PostStep.caption)
-                  _posting
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 16),
-                          child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: C.green)))
-                      : TextButton(
-                          onPressed: _post,
-                          child: Text(isBusiness ? 'List' : 'Share',
-                              style: const TextStyle(
-                                  color: C.green,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15)))
-                else
-                  const SizedBox(width: 56),
-              ])),
-          const Divider(height: 1),
-          Flexible(
-            child: _step == _PostStep.pick
-                ? _buildPick(dk)
-                : _step == _PostStep.edit
-                    ? _buildEdit(dk)
-                    : _buildCaption(dk),
-          ),
-          SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
-        ]));
+    return Scaffold(
+      backgroundColor: dk ? C.surfD : C.bgL,
+      appBar: AppBar(
+        backgroundColor: dk ? C.surfD : C.bgL,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded),
+          color: dk ? C.subD : C.subL,
+          onPressed: () => Navigator.pop(context)),
+        title: Text(
+            _step == _PostStep.pick
+                ? (isBusiness ? 'New Product' : 'New Post')
+                : (isBusiness ? 'Product Details' : 'Edit Post'),
+            style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: dk ? C.textD : C.textL)),
+        centerTitle: true,
+        actions: [
+          if (_step == _PostStep.caption)
+            _posting
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: C.green)))
+                : TextButton(
+                    onPressed: _post,
+                    child: Text(isBusiness ? 'List' : 'Share',
+                        style: const TextStyle(
+                            color: C.green,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15)))
+          else
+            const SizedBox(width: 56),
+        ],
+      ),
+      body: _step == _PostStep.pick
+          ? _buildPick(dk)
+          : _buildCaption(dk),
+    );
   }
 
   Widget _buildPick(bool dk) => InkWell(
@@ -557,374 +449,73 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
             Icon(Icons.add_photo_alternate_outlined,
                 size: 48, color: dk ? C.subD : C.subL),
             const SizedBox(height: 12),
-            Text('Choose photo or video',
+            Text('Choose photos & videos',
                 style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: dk ? C.textD : C.textL)),
             const SizedBox(height: 6),
-            Text('Tap to pick from gallery',
+            Text('Mixed media, newest first — pick up to 10',
                 style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
           ])));
 
-  // ── Edit step: filters / text overlay / freehand drawing on the photo ──────
-  Widget _buildEdit(bool dk) {
-    if (_croppedPath == null) return const SizedBox();
-    return SingleChildScrollView(
-      child: Column(children: [
-        RepaintBoundary(
-          key: _editPreviewKey,
-          child: AspectRatio(
-            aspectRatio: _imageAspectRatio,
-            child: GestureDetector(
-              onPanStart: (d) {
-                if (_editTab.index != 2) return;
-                final box = _editPreviewKey.currentContext?.findRenderObject()
-                    as RenderBox?;
-                if (box == null) return;
-                setState(() =>
-                    _currentStroke = [box.globalToLocal(d.globalPosition)]);
-              },
-              onPanUpdate: (d) {
-                if (_editTab.index != 2 || _currentStroke == null) return;
-                final box = _editPreviewKey.currentContext?.findRenderObject()
-                    as RenderBox?;
-                if (box == null) return;
-                setState(() => _currentStroke = [
-                      ..._currentStroke!,
-                      box.globalToLocal(d.globalPosition)
-                    ]);
-              },
-              onPanEnd: (_) {
-                if (_editTab.index != 2 || _currentStroke == null) return;
-                setState(() {
-                  _strokes.add(_currentStroke!);
-                  _currentStroke = null;
-                });
-              },
-              child: Stack(fit: StackFit.expand, children: [
-                ColorFiltered(
-                  colorFilter: _filterIdx < _filterMatrices.length &&
-                          _filterMatrices[_filterIdx] == null
-                      ? const ColorFilter.matrix(<double>[
-                          1,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0,
-                          1,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0,
-                          1,
-                          0,
-                          0,
-                          0,
-                          0,
-                          0,
-                          1,
-                          0
-                        ])
-                      : _filterIdx < _filterMatrices.length &&
-                              _filterMatrices[_filterIdx] != null
-                          ? ColorFilter.matrix(_filterMatrices[_filterIdx]!)
-                          : const ColorFilter.matrix(<double>[
-                              1,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              1,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              1,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              1,
-                              0
-                            ]),
-                  child: fileImage(_picked!.path, fit: BoxFit.cover),
-                ),
-                if (_strokes.isNotEmpty || _currentStroke != null)
-                  CustomPaint(
-                      painter: _DrawPainter(
-                          strokes: _strokes,
-                          current: _currentStroke,
-                          color: _brushColor,
-                          width: _brushSize)),
-                if (_textOverlay.trim().isNotEmpty)
-                  Positioned.fill(
-                    child: Align(
-                      alignment: Alignment(
-                          _textOffset.dx * 2 - 1, _textOffset.dy * 2 - 1),
-                      child: GestureDetector(
-                        onPanUpdate: (d) {
-                          final box = _editPreviewKey.currentContext
-                              ?.findRenderObject() as RenderBox?;
-                          if (box == null) return;
-                          final size = box.size;
-                          setState(() {
-                            _textOffset = Offset(
-                              (_textOffset.dx + d.delta.dx / size.width)
-                                  .clamp(0.05, 0.95),
-                              (_textOffset.dy + d.delta.dy / size.height)
-                                  .clamp(0.05, 0.95),
-                            );
-                          });
-                        },
-                        child: Text(_textOverlay,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 26,
-                                fontWeight: FontWeight.w800,
-                                fontFamily: _fontIdx < _fontFamilies.length
-                                    ? _fontFamilies[_fontIdx]
-                                    : null,
-                                shadows: const [
-                                  Shadow(color: Colors.black54, blurRadius: 8)
-                                ])),
-                      ),
-                    ),
-                  ),
-              ]),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        TabBar(
-            controller: _editTab,
-            labelColor: C.green,
-            unselectedLabelColor: dk ? C.subD : C.subL,
-            indicatorColor: C.green,
-            tabs: const [
-              Tab(text: 'Filters'),
-              Tab(text: 'Text'),
-              Tab(text: 'Draw')
-            ]),
-        SizedBox(
-          height: 150,
-          child: TabBarView(controller: _editTab, children: [
-            _buildFiltersTab(dk),
-            _buildTextTab(dk),
-            _buildDrawTab(dk),
-          ]),
-        ),
-        Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: OutlinedButton.icon(
-                onPressed: _recrop,
-                icon: const Icon(Icons.crop_rounded, size: 16, color: C.green),
-                label: const Text('Re-crop', style: TextStyle(color: C.green)),
-                style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: C.green),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8))))),
-      ]),
+  // ── Caption step ────────────────────────────────────────────────────────────
+  Widget _thumbFor(XFile f, double w, double h, BoxFit fit) {
+    final path = f.path;
+    if (path.isNotEmpty) return fileImage(path, width: w, height: h, fit: fit);
+    // Web-edited images are in-memory (no path) — decode the bytes instead.
+    return FutureBuilder<Uint8List>(
+      future: f.readAsBytes(),
+      builder: (_, snap) => snap.hasData
+          ? Image.memory(snap.data!, width: w, height: h, fit: fit)
+          : Container(width: w, height: h, color: const Color(0xFF26262B)),
     );
   }
 
-  Widget _buildFiltersTab(bool dk) => ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: _filterNames.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (_, i) {
-          final selected = _filterIdx == i;
-          return GestureDetector(
-            onTap: () => setState(() => _filterIdx = i),
-            child: Column(children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color:
-                            selected ? C.green : (dk ? C.borderD : C.borderL),
-                        width: selected ? 2 : 1)),
-                clipBehavior: Clip.antiAlias,
-                child: _picked == null
-                    ? null
-                    : ColorFiltered(
-                        colorFilter: _filterMatrices[i] == null
-                            ? const ColorFilter.matrix(<double>[
-                                1,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                1,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                1,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                1,
-                                0
-                              ])
-                            : ColorFilter.matrix(_filterMatrices[i]!),
-                        child:
-                            fileImage(_picked!.path, fit: BoxFit.cover),
-                      ),
-              ),
-              const SizedBox(height: 4),
-              Text(_filterNames[i],
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: selected ? C.green : (dk ? C.subD : C.subL),
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.w500)),
-            ]),
-          );
-        },
-      );
-
-  Widget _buildTextTab(bool dk) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextField(
-            onChanged: (v) => setState(() => _textOverlay = v),
-            decoration: InputDecoration(
-                hintText: 'Add text to your photo…',
-                hintStyle: TextStyle(color: dk ? C.subD : C.subL),
-                filled: true,
-                fillColor: dk ? C.surf2D : C.surfL,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none)),
-            style: TextStyle(color: dk ? C.textD : C.textL, fontSize: 14),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _fonts.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final selected = _fontIdx == i;
-                return GestureDetector(
-                  onTap: () => setState(() => _fontIdx = i),
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                        color: selected ? C.green : (dk ? C.surf2D : C.surfL),
-                        borderRadius: BorderRadius.circular(18)),
-                    child: Text(_fonts[i],
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontFamily: _fontFamilies[i],
-                            color: selected
-                                ? Colors.white
-                                : (dk ? C.subD : C.subL))),
-                  ),
-                );
-              },
-            ),
-          ),
-        ]),
-      );
-
-  Widget _buildDrawTab(bool dk) => Column(children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(children: [
-            ..._brushColors.map((c) => GestureDetector(
-                  onTap: () => setState(() => _brushColor = c),
-                  child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: c,
-                          border: Border.all(
-                              color: _brushColor == c
-                                  ? C.green
-                                  : Colors.transparent,
-                              width: 2.5))),
-                )),
-            const Spacer(),
-            IconButton(
-                onPressed: _strokes.isEmpty
-                    ? null
-                    : () => setState(() => _strokes.removeLast()),
-                icon: Icon(Icons.undo_rounded, color: dk ? C.subD : C.subL)),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(children: [
-            Text('Size',
-                style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
-            Expanded(
-                child: Slider(
-                    value: _brushSize,
-                    min: 2,
-                    max: 16,
-                    activeColor: C.green,
-                    onChanged: (v) => setState(() => _brushSize = v))),
-          ]),
-        ),
-        Text('Draw directly on the photo above',
-            style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL)),
-      ]);
-
-  // ── Caption step ────────────────────────────────────────────────────────────
-  bool _isVideoFile(String path) {
-    final p = path.toLowerCase();
-    return p.endsWith('.mp4') ||
-        p.endsWith('.mov') ||
-        p.endsWith('.m4v') ||
-        p.endsWith('.3gp');
-  }
-
-  Widget _buildMultiThumbStrip(bool dk) => SizedBox(
+  Widget _buildMediaStrip(bool dk) => SizedBox(
         height: 84,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          itemCount: _multiFiles.length,
+          itemCount: _media.length,
           separatorBuilder: (_, __) => const SizedBox(width: 8),
           itemBuilder: (_, i) {
-            final f = _multiFiles[i];
-            final isVid = _isVideoFile(f.path);
+            final m = _media[i];
+            final edited = m.edited != null;
             return Stack(clipBehavior: Clip.none, children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: isVid
-                    ? Container(
-                        width: 76,
-                        height: 76,
-                        color: dk ? C.surf2D : C.surfL,
-                        child: const Icon(Icons.videocam_rounded,
-                            color: C.green, size: 28))
-                    : fileImage(f.path,
-                        width: 76, height: 76, fit: BoxFit.cover),
+              GestureDetector(
+                onTap: () => _editMedia(m),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: m.isVideo
+                      ? Container(
+                          width: 76,
+                          height: 76,
+                          color: dk ? C.surf2D : C.surfL,
+                          child: const Icon(Icons.videocam_rounded,
+                              color: C.green, size: 28))
+                      : _thumbFor(m.upload, 76, 76, BoxFit.cover),
+                ),
               ),
+              if (edited)
+                Positioned(
+                    left: 2,
+                    bottom: 2,
+                    child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                            color: C.green,
+                            borderRadius: BorderRadius.circular(6)),
+                        child: const Text('Edited',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700)))),
               Positioned(
                 top: -6,
                 right: -6,
                 child: GestureDetector(
-                  onTap: () => setState(() => _multiFiles.removeAt(i)),
+                  onTap: () => setState(() => _media.removeAt(i)),
                   child: Container(
                     width: 22,
                     height: 22,
@@ -940,101 +531,124 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
         ),
       );
 
+  Widget _captionAction({
+    required IconData icon,
+    required String label,
+    String? value,
+    required VoidCallback onTap,
+    required bool dk,
+  }) =>
+      OutlinedButton(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(44),
+            alignment: Alignment.centerLeft,
+            side: BorderSide(color: dk ? C.borderD : C.borderL),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8))),
+        child: Row(children: [
+          Icon(icon, size: 18, color: C.green),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text(value ?? label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      color:
+                          value == null ? C.green : (dk ? C.textD : C.textL),
+                      fontWeight:
+                          value == null ? FontWeight.w600 : FontWeight.w500))),
+        ]),
+      );
+
+  Future<void> _pickAudience() async {
+    final dk = context.read<DarkProvider>().isDark;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: dk ? C.surfD : C.bgL,
+      builder: (ctx) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+        ListTile(
+          leading: Icon(Icons.public_rounded,
+              color: _audience == 'everyone' ? C.green : null),
+          title: const Text('Everyone',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text('Visible to all MarketHouse users',
+              style: TextStyle(fontSize: 12)),
+          onTap: () => Navigator.pop(ctx, 'everyone'),
+        ),
+        ListTile(
+          leading: Icon(Icons.group_rounded,
+              color: _audience == 'followers' ? C.green : null),
+          title: const Text('Followers',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text('Visible to people following you',
+              style: TextStyle(fontSize: 12)),
+          onTap: () => Navigator.pop(ctx, 'followers'),
+        ),
+        ListTile(
+          leading: Icon(Icons.person_pin_rounded,
+              color: _audience == 'select' ? C.green : null),
+          title: const Text('Selected people',
+              style: TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: const Text('Only the people you choose can see this',
+              style: TextStyle(fontSize: 12)),
+          onTap: () => Navigator.pop(ctx, 'select'),
+        ),
+        const SizedBox(height: 8),
+      ])),
+    );
+    if (choice == null || !mounted) return;
+    setState(() => _audience = choice);
+    if (choice != 'select') return;
+    final ap = context.read<AppState>();
+    final userId = ap.user?.id ?? 0;
+    showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _TagPeopleSheet(
+            myUserId: userId,
+            alreadyTagged: _audienceUsers,
+            title: 'Who can see this?',
+            onDone: (list) => setState(() => _audienceUsers = list)));
+  }
+
   Widget _buildCaption(bool dk) {
     final isBusiness = context.read<AppState>().user?.isBusiness ?? false;
-    final thumb = ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: _multiFiles.isNotEmpty
-          ? Stack(children: [
-              _isVideoFile(_multiFiles.first.path)
-                  ? Container(
-                      width: 76,
-                      height: 76,
-                      color: dk ? C.surf2D : C.surfL,
-                      child: const Icon(Icons.videocam_rounded,
-                          color: C.green, size: 28))
-                  : fileImage(_multiFiles.first.path,
-                      width: 76, height: 76, fit: BoxFit.cover),
-              if (_multiFiles.length > 1)
-                Positioned(
-                  right: 4,
-                  bottom: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Text('+${_multiFiles.length - 1}',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ),
-            ])
-          : _isVideo
-              ? Container(
-                  width: 76,
-                  height: 76,
-                  color: dk ? C.surf2D : C.surfL,
-                  child:
-                      const Icon(Icons.videocam_rounded, color: C.green, size: 28))
-              : (_croppedPath != null
-                  ? fileImage(_croppedPath!,
-                      width: 76, height: 76, fit: BoxFit.cover)
-                  : Container(
-                      width: 76, height: 76, color: dk ? C.surf2D : C.surfL)),
-    );
-
-    if (isBusiness) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            thumb,
-            const SizedBox(width: 12),
-            Expanded(
-                child: Text(
-              'This will be listed as a product in your Shop, not a regular post.',
-              style: TextStyle(
-                  fontSize: 12.5, color: dk ? C.subD : C.subL, height: 1.35),
-            )),
-          ]),
-          if (_multiFiles.length > 1) ...[
-            const SizedBox(height: 10),
-            _buildMultiThumbStrip(dk),
-          ],
+    final audienceLabel = switch (_audience) {
+      'followers' => 'Followers',
+      'select' => 'Selected people',
+      _ => 'Everyone',
+    };
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _buildMediaStrip(dk),
+        if (isBusiness) ...[
+          const SizedBox(height: 12),
+          Text(
+            'This will be listed as a product in your Shop, not a regular post.',
+            style: TextStyle(
+                fontSize: 12.5, color: dk ? C.subD : C.subL, height: 1.35),
+          ),
           const SizedBox(height: 16),
           _ProductField(
               label: 'Product name',
               controller: _productNameCtl,
               dk: dk,
               hint: 'e.g. Wireless Earbuds'),
-            const SizedBox(height: 12),
-            OutlinedButton(
-                onPressed: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const Shop())),
-                style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(44),
-                    side: BorderSide(color: dk ? C.borderD : C.borderL),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8))),
-                child: Text('Browse market (supply & demand)',
-                    style: TextStyle(
-                        color: C.green,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13))),
-            const SizedBox(height: 10),
-            Row(children: [
+          const SizedBox(height: 12),
+          Row(children: [
             Expanded(
                 child: _ProductField(
                     label: 'Price (₦)',
                     controller: _priceCtl,
                     dk: dk,
                     hint: '0.00',
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true))),
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true))),
             const SizedBox(width: 12),
             Expanded(
               child: _unlimitedStock
@@ -1060,7 +674,8 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                 activeColor: C.green,
                 onChanged: (v) => setState(() => _unlimitedStock = v ?? false)),
             Text('Unlimited stock',
-                style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL)),
+                style:
+                    TextStyle(fontSize: 13, color: dk ? C.textD : C.textL)),
           ]),
           const SizedBox(height: 4),
           Text('Category',
@@ -1085,7 +700,8 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                     child: Text(c,
                         style: TextStyle(
                             fontSize: 12.5,
-                            color: sel ? Colors.white : (dk ? C.subD : C.subL),
+                            color:
+                                sel ? Colors.white : (dk ? C.subD : C.subL),
                             fontWeight:
                                 sel ? FontWeight.w700 : FontWeight.w500)),
                   ),
@@ -1115,81 +731,78 @@ class _PostCreatorSheetState extends State<_PostCreatorSheet>
                     TextStyle(color: dk ? C.subD : C.subL, fontSize: 11)),
             style: TextStyle(color: dk ? C.textD : C.textL, fontSize: 14),
           ),
-        ]),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          thumb,
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: _captionCtl,
-              maxLines: 5,
-              minLines: 3,
-              maxLength: 2000,
-              decoration: InputDecoration(
-                  hintText: 'Write a caption…',
-                  hintStyle: TextStyle(color: dk ? C.subD : C.subL),
-                  filled: true,
-                  fillColor: dk ? C.surf2D : C.surfL,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none),
-                  counterStyle:
-                      TextStyle(color: dk ? C.subD : C.subL, fontSize: 11)),
-              style: TextStyle(color: dk ? C.textD : C.textL, fontSize: 14),
-            ),
+        ] else ...[
+          const SizedBox(height: 14),
+          TextField(
+            controller: _captionCtl,
+            maxLines: 5,
+            minLines: 3,
+            maxLength: 2000,
+            decoration: InputDecoration(
+                hintText: 'Write a caption…',
+                hintStyle: TextStyle(color: dk ? C.subD : C.subL),
+                filled: true,
+                fillColor: dk ? C.surf2D : C.surfL,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none),
+                counterStyle:
+                    TextStyle(color: dk ? C.subD : C.subL, fontSize: 11)),
+            style: TextStyle(color: dk ? C.textD : C.textL, fontSize: 14),
           ),
-        ]),
-        if (_multiFiles.length > 1) ...[
+          const SizedBox(height: 14),
+          if (_taggedUsers.isNotEmpty) ...[
+            Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _taggedUsers
+                    .map((u) => Chip(
+                          avatar: const Icon(Icons.alternate_email_rounded,
+                              size: 14, color: C.green),
+                          label: Text('@${u.username}',
+                              style: const TextStyle(
+                                  fontSize: 12, color: C.green)),
+                          onDeleted: () =>
+                              setState(() => _taggedUsers.remove(u)),
+                          backgroundColor: dk ? C.surf2D : C.greenBg,
+                          deleteIconColor: dk ? C.subD : C.subL,
+                          side: BorderSide.none,
+                        ))
+                    .toList()),
+            const SizedBox(height: 10),
+          ],
+          _captionAction(
+              icon: Icons.alternate_email_rounded,
+              label: 'Tag people',
+              onTap: () {
+                final ap = context.read<AppState>();
+                final userId = ap.user?.id ?? 0;
+                showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => _TagPeopleSheet(
+                        myUserId: userId,
+                        alreadyTagged: _taggedUsers,
+                        onDone: (list) =>
+                            setState(() => _taggedUsers = list)));
+              },
+              dk: dk),
           const SizedBox(height: 10),
-          _buildMultiThumbStrip(dk),
-        ],
-        const SizedBox(height: 14),
-        if (_taggedUsers.isNotEmpty) ...[
-          Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _taggedUsers
-                  .map((u) => Chip(
-                        avatar: const Icon(Icons.alternate_email_rounded,
-                            size: 14, color: C.green),
-                        label: Text('@${u.username}',
-                            style:
-                                const TextStyle(fontSize: 12, color: C.green)),
-                        onDeleted: () => setState(() => _taggedUsers.remove(u)),
-                        backgroundColor: dk ? C.surf2D : C.greenBg,
-                        deleteIconColor: dk ? C.subD : C.subL,
-                        side: BorderSide.none,
-                      ))
-                  .toList()),
+          _captionAction(
+              icon: Icons.place_rounded,
+              label: 'Add location',
+              value: _location.isEmpty ? null : _location,
+              onTap: _pickLocation,
+              dk: dk),
           const SizedBox(height: 10),
+          _captionAction(
+              icon: Icons.visibility_rounded,
+              label: 'Audience',
+              value: audienceLabel,
+              onTap: _pickAudience,
+              dk: dk),
         ],
-        OutlinedButton.icon(
-          onPressed: () {
-            final ap = context.read<AppState>();
-            final userId = ap.user?.id ?? 0;
-            showModalBottomSheet(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => _TagPeopleSheet(
-                    myUserId: userId,
-                    alreadyTagged: _taggedUsers,
-                    onDone: (list) => setState(() => _taggedUsers = list)));
-          },
-          icon: const Icon(Icons.alternate_email_rounded,
-              size: 16, color: C.green),
-          label: const Text('Tag people', style: TextStyle(color: C.green)),
-          style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: C.green),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8))),
-        ),
       ]),
     );
   }
@@ -1231,250 +844,6 @@ class _ProductField extends StatelessWidget {
           style: TextStyle(color: dk ? C.textD : C.textL, fontSize: 14),
         ),
       ]);
-}
-
-class _DrawPainter extends CustomPainter {
-  final List<List<Offset>> strokes;
-  final List<Offset>? current;
-  final Color color;
-  final double width;
-  _DrawPainter(
-      {required this.strokes,
-      required this.current,
-      required this.color,
-      required this.width});
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = width
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    for (final stroke in strokes) {
-      for (var i = 0; i < stroke.length - 1; i++) {
-        canvas.drawLine(stroke[i], stroke[i + 1], paint);
-      }
-    }
-    if (current != null) {
-      for (var i = 0; i < current!.length - 1; i++) {
-        canvas.drawLine(current![i], current![i + 1], paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DrawPainter oldDelegate) => true;
-}
-
-// ── Post Edit Sheet ──────────────────────────────────────────────────────────
-class _PostEditSheet extends StatefulWidget {
-  final int postId;
-  final String initialCaption;
-  final List<int> initialTaggedIds;
-  const _PostEditSheet(
-      {required this.postId,
-      required this.initialCaption,
-      required this.initialTaggedIds});
-  @override
-  State<_PostEditSheet> createState() => _PostEditSheetState();
-}
-
-class _PostEditSheetState extends State<_PostEditSheet> {
-  late TextEditingController _ctl;
-  List<_SlimUser> _taggedUsers = [];
-  bool _saving = false;
-  @override
-  void initState() {
-    super.initState();
-    _ctl = TextEditingController(text: widget.initialCaption);
-  }
-
-  @override
-  void dispose() {
-    _ctl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    try {
-      await Api.editPost(widget.postId,
-          caption: _ctl.text.trim(),
-          taggedUserIds: _taggedUsers.map((u) => u.id).toList());
-      if (!mounted) return;
-      final ap = context.read<AppState>();
-      await ap.fetchProfile();
-      if (!mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Post updated ✓'),
-          backgroundColor: C.green,
-          behavior: SnackBarBehavior.floating));
-    } catch (e) {
-      if (mounted) {
-        setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: C.err,
-            behavior: SnackBarBehavior.floating));
-      }
-    }
-  }
-
-  Future<void> _delete() async {
-    final confirm = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-                title: const Text('Delete post?'),
-                content: const Text('This cannot be undone.'),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel')),
-                  TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Delete',
-                          style: TextStyle(color: Colors.red)))
-                ]));
-    if (confirm != true || !mounted) return;
-    try {
-      await Api.deletePost(widget.postId);
-      if (!mounted) return;
-      final ap = context.read<AppState>();
-      await ap.fetchProfile();
-      if (!mounted) return;
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Post deleted'), behavior: SnackBarBehavior.floating));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: C.err,
-            behavior: SnackBarBehavior.floating));
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dk = context.watch<DarkProvider>().isDark;
-    final ap = context.read<AppState>();
-    return Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Container(
-            decoration: BoxDecoration(
-                color: dk ? C.surfD : C.bgL,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(20))),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const SizedBox(height: 12),
-              Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                      color: dk ? C.borderD : C.borderL,
-                      borderRadius: BorderRadius.circular(2))),
-              Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
-                  child: Row(children: [
-                    Text('Edit post',
-                        style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: dk ? C.textD : C.textL)),
-                    const Spacer(),
-                    IconButton(
-                        onPressed: _delete,
-                        icon: const Icon(Icons.delete_outline_rounded,
-                            color: Colors.red, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints()),
-                    const SizedBox(width: 12),
-                    _saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: C.green))
-                        : TextButton(
-                            onPressed: _save,
-                            child: const Text('Save',
-                                style: TextStyle(
-                                    color: C.green,
-                                    fontWeight: FontWeight.w700))),
-                  ])),
-              const Divider(height: 1),
-              Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        TextField(
-                            controller: _ctl,
-                            maxLines: 4,
-                            maxLength: 2000,
-                            decoration: InputDecoration(
-                                hintText: 'Caption…',
-                                hintStyle:
-                                    TextStyle(color: dk ? C.subD : C.subL),
-                                filled: true,
-                                fillColor: dk ? C.surf2D : C.surfL,
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                    borderSide: BorderSide.none),
-                                counterStyle: TextStyle(
-                                    color: dk ? C.subD : C.subL, fontSize: 11)),
-                            style: TextStyle(
-                                color: dk ? C.textD : C.textL, fontSize: 14)),
-                        const SizedBox(height: 10),
-                        if (_taggedUsers.isNotEmpty) ...[
-                          Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: _taggedUsers
-                                  .map((u) => Chip(
-                                      avatar: const Icon(
-                                          Icons.alternate_email_rounded,
-                                          size: 14,
-                                          color: C.green),
-                                      label: Text('@${u.username}',
-                                          style: const TextStyle(
-                                              fontSize: 12, color: C.green)),
-                                      onDeleted: () => setState(
-                                          () => _taggedUsers.remove(u)),
-                                      backgroundColor:
-                                          dk ? C.surf2D : C.greenBg,
-                                      deleteIconColor: dk ? C.subD : C.subL,
-                                      side: BorderSide.none))
-                                  .toList()),
-                          const SizedBox(height: 10),
-                        ],
-                        OutlinedButton.icon(
-                            onPressed: () {
-                              final userId = ap.user?.id ?? 0;
-                              showModalBottomSheet(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  backgroundColor: Colors.transparent,
-                                  builder: (_) => _TagPeopleSheet(
-                                      myUserId: userId,
-                                      alreadyTagged: _taggedUsers,
-                                      onDone: (list) =>
-                                          setState(() => _taggedUsers = list)));
-                            },
-                            icon: const Icon(Icons.alternate_email_rounded,
-                                size: 16, color: C.green),
-                            label: const Text('Tag people',
-                                style: TextStyle(color: C.green)),
-                            style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: C.green),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8)))),
-                      ])),
-            ])));
-  }
 }
 
 // ── Follow list bottom sheet ─────────────────────────────────────────────────
@@ -1636,7 +1005,7 @@ class _UserTileState extends State<_UserTile> {
         await Api.unfollow(uid);
       }
     } catch (_) {
-      setState(() => _following = !_following);
+      if (mounted) setState(() => _following = !_following);
     }
   }
 
@@ -1730,10 +1099,12 @@ class _TagPeopleSheet extends StatefulWidget {
   final int myUserId;
   final List<_SlimUser> alreadyTagged;
   final void Function(List<_SlimUser>) onDone;
+  final String title;
   const _TagPeopleSheet(
       {required this.myUserId,
       required this.alreadyTagged,
-      required this.onDone});
+      required this.onDone,
+      this.title = 'Tag people'});
   @override
   State<_TagPeopleSheet> createState() => _TagPeopleSheetState();
 }
@@ -1793,7 +1164,7 @@ class _TagPeopleSheetState extends State<_TagPeopleSheet> {
         Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 16, 10),
             child: Row(children: [
-              Text('Tag people',
+              Text(widget.title,
                   style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
@@ -1896,6 +1267,40 @@ class _TagPeopleSheetState extends State<_TagPeopleSheet> {
   }
 }
 
+Future<void> _deletePost(BuildContext context, int postId) async {
+  final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+              title: const Text('Delete post?'),
+              content: const Text('This cannot be undone.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel')),
+                TextButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Delete',
+                        style: TextStyle(color: Colors.red)))
+              ]));
+  if (confirm != true) return;
+  try {
+    await Api.deletePost(postId);
+    if (!context.mounted) return;
+    final ap = context.read<AppState>();
+    await ap.fetchProfile();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Post deleted'), behavior: SnackBarBehavior.floating));
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: C.err,
+          behavior: SnackBarBehavior.floating));
+    }
+  }
+}
+
 // ── Post Grid (shared by Posts, Reshared, Loved, Saved) ─────────────────────
 class _PostGrid extends StatefulWidget {
   final int userId;
@@ -1961,8 +1366,10 @@ class _PostGridState extends State<_PostGrid>
         final p = _posts![i] as Map<String, dynamic>;
         final mediaUrl = p['media_url'] as String? ?? '';
         final isVideo = p['media_type'] == 'video';
+        final pinned = p['pinned'] == true;
         final likeCount = (p['like_count'] as num?)?.toInt() ?? 0;
-        final commentCount = (p['comment_count'] as num?)?.toInt() ?? 0;
+        final viewCount = (p['views'] as num?)?.toInt() ?? 0;
+        final isMe = context.read<AppState>().user?.id == widget.userId;
         return GestureDetector(
           onTap: () => Navigator.push(
               context,
@@ -1976,15 +1383,52 @@ class _PostGridState extends State<_PostGrid>
               context: context,
               isScrollControlled: true,
               backgroundColor: Colors.transparent,
-              builder: (_) => Padding(
+              builder: (bctx) => Padding(
                 padding: EdgeInsets.only(
-                    bottom: MediaQuery.of(context).viewInsets.bottom),
-                child: _PostEditSheet(
-                    postId: p['id'] as int,
-                    initialCaption: p['caption'] as String? ?? '',
-                    initialTaggedIds: []),
+                    bottom: MediaQuery.of(bctx).viewInsets.bottom),
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                      color: widget.dk ? C.surfD : Colors.white,
+                      borderRadius: BorderRadius.circular(18)),
+                  child: SafeArea(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      if (isMe)
+                        ListTile(
+                          leading: Icon(pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                              color: widget.dk ? C.textD : C.textL),
+                          title: Text(pinned ? 'Unpin from profile' : 'Pin to profile',
+                              style: TextStyle(color: widget.dk ? C.textD : C.textL, fontWeight: FontWeight.w600)),
+                          subtitle: Text('Pinned posts stay on top (max 3)',
+                              style: TextStyle(fontSize: 12, color: widget.dk ? C.subD : C.subL)),
+                          onTap: () async {
+                            Navigator.pop(bctx);
+                            try {
+                              await Api.pinPost(p['id'] as int, !pinned);
+                              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text(pinned ? 'Unpinned' : 'Pinned to your profile'),
+                                  backgroundColor: C.green, behavior: SnackBarBehavior.floating));
+                            } catch (e) {
+                              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: Text('Error: $e'), behavior: SnackBarBehavior.floating));
+                            }
+                            _load();
+                          },
+                        ),
+                      ListTile(
+                        leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                        title: const Text('Delete post',
+                            style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                        onTap: () {
+                          Navigator.pop(bctx);
+                          _deletePost(context, p['id'] as int).then((_) => _load());
+                        },
+                      ),
+                    ]),
+                  ),
+                ),
               ),
-            ).then((_) => _load());
+            );
           },
           child: Stack(fit: StackFit.expand, children: [
             mediaUrl.isEmpty
@@ -2003,6 +1447,12 @@ class _PostGridState extends State<_PostGrid>
                   right: 4,
                   child: Icon(Icons.play_circle_fill_rounded,
                       color: Colors.white, size: 18)),
+            if (pinned)
+              const Positioned(
+                  top: 4,
+                  left: 4,
+                  child: Icon(Icons.push_pin_rounded,
+                      color: Colors.white, size: 16)),
             Positioned(
               bottom: 0,
               left: 0,
@@ -2024,10 +1474,10 @@ class _PostGridState extends State<_PostGrid>
                           fontSize: 11,
                           fontWeight: FontWeight.w600)),
                   const SizedBox(width: 10),
-                  const Icon(Icons.chat_bubble_rounded,
+                  const Icon(Icons.visibility_rounded,
                       color: Colors.white, size: 12),
                   const SizedBox(width: 3),
-                  Text('$commentCount',
+                  Text('$viewCount',
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -2052,6 +1502,7 @@ class Profile extends StatefulWidget {
 class _ProfileState extends State<Profile> with TickerProviderStateMixin {
   TabController? _tab;
   bool _tabIsBusiness = false;
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
 
   @override
   void initState() {
@@ -2060,6 +1511,11 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ap = context.read<AppState>();
       if (ap.status == ProfileStatus.idle || ap.user == null) ap.fetchProfile();
+    });
+    _wsSub = WsService().stream.listen((ev) {
+      if (ev['type'] == 'post_created' && mounted) {
+        context.read<AppState>().fetchProfile();
+      }
     });
   }
 
@@ -2071,6 +1527,7 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _wsSub?.cancel();
     _tab?.dispose();
     super.dispose();
   }
@@ -2079,13 +1536,11 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
     final msg = ScaffoldMessenger.of(context);
     final ap = context.read<AppState>();
     try {
-      final picker = ImagePicker();
-      final XFile? picked = await picker.pickImage(
-          source: ImageSource.gallery,
-          imageQuality: 90,
-          maxWidth: isHeader ? 1440 : 900,
-          maxHeight: isHeader ? 810 : 900);
-      if (picked == null || !mounted) return;
+      // Same in-app gallery the chat/community pickers use.
+      final pickedList =
+          await pickImagesInApp(context, maxImages: 1, allowVideo: false);
+      if (pickedList.isEmpty || !mounted) return;
+      final picked = pickedList.first;
       final XFile croppedX;
       if (kIsWeb) {
         // image_cropper's web UI has no working "Done" button — use the
@@ -2278,10 +1733,28 @@ class _ProfileState extends State<Profile> with TickerProviderStateMixin {
                     ? _ProfileTabs(tab: _tab!, dk: dk, userId: user.id, isBusiness: user.isBusiness)
                     : _EmptyProfile(dk: dk),
               ]))),
-      floatingActionButton: FloatingActionButton(
-          onPressed: _showPostCreator,
-          backgroundColor: C.green,
-          child: const Icon(Icons.add_rounded, color: Colors.white)),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: FloatingActionButton.small(
+              heroTag: 'cart',
+              onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const CartScreen())),
+              backgroundColor: dk ? C.surf2D : Colors.white,
+              foregroundColor: C.green,
+              elevation: 2,
+              child: const Icon(Icons.shopping_cart_outlined, size: 22),
+            ),
+          ),
+          FloatingActionButton(
+            heroTag: 'post',
+            onPressed: _showPostCreator,
+            backgroundColor: C.green,
+            child: const Icon(Icons.add_rounded, color: Colors.white)),
+        ],
+      ),
     );
   }
 }
@@ -2308,10 +1781,10 @@ class _ProfileTabs extends StatelessWidget {
             isScrollable: isBusiness,
             tabs: [
               const Tab(text: 'Posts'),
-              if (isBusiness) const Tab(text: 'Shop'),
-              const Tab(text: 'Reshared'),
+              if (isBusiness) const Tab(text: 'Commerce'),
               const Tab(text: 'Loved'),
               const Tab(text: 'Saved'),
+              const Tab(text: 'Reshared'),
             ],
           )),
       SizedBox(
@@ -2320,11 +1793,11 @@ class _ProfileTabs extends StatelessWidget {
             _PostGrid(userId: userId, dk: dk),
             if (isBusiness) _ShopTab(dk: dk),
             _PostGrid(
-                userId: userId, dk: dk, fetcher: () => Api.getResharedPosts()),
-            _PostGrid(
                 userId: userId, dk: dk, fetcher: () => Api.getLikedPosts()),
             _PostGrid(
                 userId: userId, dk: dk, fetcher: () => Api.getSavedPosts()),
+            _PostGrid(
+                userId: userId, dk: dk, fetcher: () => Api.getResharedPosts()),
           ])),
     ]);
   }
@@ -2344,12 +1817,20 @@ class _ShopTabState extends State<_ShopTab> {
   String _activeType = '';
 
   static const _typeLabels = {
-    'product': 'Products', 'service': 'Services', 'job': 'Jobs',
-    'hotel': 'Hotels', 'property': 'Properties', 'vehicle': 'Vehicles', 'event': 'Events',
+    'product': 'Products',
+    'service': 'Services',
+    'job': 'Jobs',
   };
 
   @override
   void initState() { super.initState(); _load(); }
+
+  String _fmtPrice(dynamic v) {
+    final n = (v as num).toDouble();
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}k';
+    return n.toStringAsFixed(0);
+  }
 
   Future<void> _load() async {
     try {
@@ -2357,8 +1838,7 @@ class _ShopTabState extends State<_ShopTab> {
       if (mounted) {
         setState(() {
           _listings = l;
-          final types = l.map((e) => e['type'] as String).toSet().toList();
-          if (types.isNotEmpty) _activeType = types.first;
+          _activeType = (l.isNotEmpty ? l.first['type'] as String? : null) ?? '';
           _loading = false;
         });
       }
@@ -2418,39 +1898,46 @@ class _ShopTabState extends State<_ShopTab> {
       const SizedBox(height: 10),
       Expanded(
         child: GridView.builder(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.all(2),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 0.75),
+            crossAxisCount: 3, mainAxisSpacing: 2, crossAxisSpacing: 2, childAspectRatio: 1),
           itemCount: shown.length,
           itemBuilder: (_, i) {
             final item = shown[i] as Map;
             final images = (item['images'] as List? ?? []).cast<String>();
             final img = images.isNotEmpty ? images.first : '';
-            return Container(
-              decoration: BoxDecoration(
-                color: dk ? C.surfD : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(
+            final price = item['price'];
+            final discountPrice = item['discount_price'];
+            final hasDiscount = discountPrice != null && (discountPrice as num) > 0 && discountPrice != price;
+            return GestureDetector(
+              onTap: () => openCommerceListingFeed(context, shown, i, dk),
+              child: Stack(children: [
+                Positioned.fill(
                   child: img.isNotEmpty
-                      ? Image.network(Api.resolveUrl(img), fit: BoxFit.cover, width: double.infinity,
-                          errorBuilder: (_, __, ___) => Container(color: dk ? C.surf2D : const Color(0xFFF2F2F7)))
-                      : Container(color: dk ? C.surf2D : const Color(0xFFF2F2F7),
-                          child: const Center(child: Icon(Icons.image_outlined, color: C.green))),
+                    ? Image.network(Api.resolveUrl(img), fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(color: dk ? C.surf2D : const Color(0xFFF2F2F7)))
+                    : Container(color: dk ? C.surf2D : const Color(0xFFF2F2F7),
+                        child: const Icon(Icons.image_outlined, color: C.green)),
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(item['title'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: dk ? C.textD : C.textL)),
-                    if ((item['price'] as num?) != null && (item['price'] as num) > 0) ...[
-                      const SizedBox(height: 2),
-                      Text('₦${item['price']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: C.green)),
-                    ],
-                  ]),
-                ),
+                if (hasDiscount)
+                  Positioned(top: 0, left: 0, child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE0261E),
+                      borderRadius: BorderRadius.only(bottomRight: Radius.circular(6))),
+                    child: Text('-${(100 - (discountPrice) / (price as num) * 100).round()}%',
+                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+                  )),
+                if (price != null)
+                  Positioned(bottom: 0, left: 0, right: 0, child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter, end: Alignment.topCenter,
+                        colors: [Colors.black.withValues(alpha: 0.65), Colors.transparent])),
+                    child: Text('₦${_fmtPrice(hasDiscount ? discountPrice : price)}',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800)),
+                  )),
               ]),
             );
           },
@@ -2555,7 +2042,8 @@ class _ProfileHeader extends StatelessWidget {
                               iconColor: dk ? Colors.black : Colors.white,
                               dk: dk,
                               onTap: onPhotoChoice)),
-                      // Business badge — top-right edge (personal accounts get no badge at all)
+                      // Account type badge — top-right edge.
+                      // Business gets orange work icon, personal gets green person icon.
                       if (user.isBusiness)
                         Positioned(
                             right: -2,
@@ -2564,8 +2052,19 @@ class _ProfileHeader extends StatelessWidget {
                                 icon: Icons.work_rounded,
                                 background: Colors.orange,
                                 dk: dk,
+                                count: user.salesScore,
                                 onTap: () =>
-                                    _showAccountTypeInfo(context, user, dk))),
+                                    _showAccountTypeInfo(context, user, dk)))
+                      else
+                        Positioned(
+                            right: -2,
+                            top: -2,
+                            child: _AvatarBadge(
+                                icon: Icons.person_rounded,
+                                background: C.green,
+                                dk: dk,
+                                onTap: () =>
+                                    _showPersonalInfo(context, user, dk))),
                     ])),
                 Positioned(
                     top: _headerHeight + _avatarRadius * 0.25,
@@ -2602,13 +2101,7 @@ class _ProfileHeader extends StatelessWidget {
                               MaterialPageRoute(
                                   builder: (_) => const WalletScreen()))),
                       const SizedBox(height: 8),
-                      _GlassIconBtn(
-                          icon: Icons.notifications_outlined,
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const NotificationsScreen()))),
+                      _NotifBadgeBtn(),
                       const SizedBox(height: 8),
                       _GlassIconBtn(
                           icon: Icons.settings_outlined,
@@ -2670,30 +2163,21 @@ class _ProfileHeader extends StatelessWidget {
               Expanded(
                   child: OutlinedButton(
                       onPressed: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => SupplyPage())),
+                          MaterialPageRoute(builder: (_) => ChangeNotifierProvider(
+                            create: (_) => MarketContext(),
+                            child: const MySupplyPage()))),
                       style: OutlinedButton.styleFrom(
                           side: BorderSide(color: dk ? C.borderD : C.borderL),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8))),
-                      child: Text('supply',
+                      child: Text('Supply',
                           style: TextStyle(
                               color: dk ? C.textD : C.textL,
                               fontWeight: FontWeight.w600,
                               fontSize: 13)))),
               const SizedBox(width: 10),
               Expanded(
-                  child: OutlinedButton(
-                      onPressed: () => Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => DemandPage())),
-                      style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: dk ? C.borderD : C.borderL),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8))),
-                      child: Text('demand',
-                          style: TextStyle(
-                              color: dk ? C.textD : C.textL,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13)))),
+                  child: _DemandBadgeBtn(dk: dk)),
             ]),
             const SizedBox(height: 8),
           ])),
@@ -2759,6 +2243,17 @@ class _ProfileHeader extends StatelessWidget {
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => BusinessInfoSheet(user: user, dk: dk),
+    );
+  }
+
+  void _showPersonalInfo(BuildContext context, dynamic user, bool dk) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: dk ? C.surfD : Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => PersonalInfoSheet(user: user, dk: dk),
     );
   }
 }
@@ -2910,6 +2405,7 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
   Widget build(BuildContext context) {
     final dk = widget.dk;
     final isBusiness = widget.user.isBusiness == true;
+    final logoUrl = widget.user.profilePhoto as String? ?? '';
 
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
@@ -2921,18 +2417,36 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
         padding: const EdgeInsets.fromLTRB(20, 22, 20, 30),
         children: [
           Center(
-            child: Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
+            child: logoUrl.isNotEmpty
+              ? GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    // Navigate to commerce page to show all listings
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const Commerce()));
+                  },
+                  child: Container(
+                    width: 56, height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.orange, width: 2)),
+                    child: ClipOval(
+                      child: Image.network(Api.resolveUrl(logoUrl),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: Colors.orange.withValues(alpha: .15),
+                          child: const Icon(Icons.work_rounded, color: Colors.orange))))),
+                )
+              : Container(
+                  width: 56, height: 56,
+                  decoration: BoxDecoration(
                     color: Colors.orange.withValues(alpha: .15),
                     shape: BoxShape.circle),
-                child: const Icon(Icons.work_rounded, color: Colors.orange)),
+                  child: const Icon(Icons.work_rounded, color: Colors.orange, size: 28)),
           ),
           const SizedBox(height: 12),
           Center(
             child: Text(
-                _editing ? 'Edit business info' : 'Business Account',
+                _editing ? 'Edit business info' : (isBusiness ? _nameCtl.text : 'Business Account'),
                 style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
@@ -3070,8 +2584,9 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
               const SizedBox(height: 16),
             ],
             ..._infoRow('Category', _categoryCtl.text, dk),
-            ..._infoRow('Phone', _phoneCtl.text.trim().isEmpty ? '' : '$_dialCode ${_phoneCtl.text.trim()}', dk),
-            ..._infoRow('Email', _emailCtl.text, dk),
+            ..._infoRow('Phone', _phoneCtl.text.trim().isEmpty ? '' : '$_dialCode ${_phoneCtl.text.trim()}', dk,
+              isWhatsApp: true),
+            ..._infoRow('Email', _emailCtl.text, dk, isLink: true),
             ..._infoRow('Website', _websiteCtl.text, dk, isLink: true),
             if (_locationLabel.isNotEmpty) ...[
               ..._infoRow('Address', _locationLabel, dk,
@@ -3103,12 +2618,12 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
   }
 
   List<Widget> _infoRow(String label, String value, bool dk,
-      {bool isLink = false, VoidCallback? onTap, bool trailingIcon = false}) {
+      {bool isLink = false, VoidCallback? onTap, bool trailingIcon = false, bool isWhatsApp = false}) {
     if (value.trim().isEmpty) return [];
     final valueWidget = Text(value,
         style: TextStyle(
             fontSize: 13,
-            color: onTap != null || isLink
+            color: onTap != null || isLink || isWhatsApp
                 ? C.green
                 : (dk ? C.textD : C.textL),
             decoration: isLink ? TextDecoration.underline : null,
@@ -3125,14 +2640,18 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
                       fontWeight: FontWeight.w600,
                       color: dk ? C.subD : C.subL))),
           Expanded(
-              child: (onTap != null || isLink)
+              child: (onTap != null || isLink || isWhatsApp)
                   ? GestureDetector(
-                      onTap: isLink ? () => _openLink(value) : onTap,
+                      onTap: isLink
+                          ? () => _openLink(value)
+                          : isWhatsApp
+                              ? () => _openWhatsApp(value)
+                              : onTap,
                       child: Row(children: [
                         Flexible(child: valueWidget),
-                        if (trailingIcon) ...[
+                        if (trailingIcon || isWhatsApp) ...[
                           const SizedBox(width: 4),
-                          const Icon(Icons.map_outlined,
+                          Icon(isWhatsApp ? Icons.chat_rounded : Icons.map_outlined,
                               size: 14, color: C.green),
                         ],
                       ]),
@@ -3160,6 +2679,94 @@ class BusinessInfoSheetState extends State<BusinessInfoSheet> {
             behavior: SnackBarBehavior.floating));
       }
     }
+  }
+
+  Future<void> _openWhatsApp(String phone) async {
+    var cleaned = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleaned.startsWith('+')) cleaned = cleaned.substring(1);
+    final uri = Uri.parse('https://wa.me/$cleaned');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open WhatsApp for $phone'),
+            backgroundColor: C.err,
+            behavior: SnackBarBehavior.floating));
+      }
+    }
+  }
+}
+
+// ── Personal account info sheet ──────────────────────────────────────────────
+class PersonalInfoSheet extends StatelessWidget {
+  final dynamic user;
+  final bool dk;
+  const PersonalInfoSheet({super.key, required this.user, required this.dk});
+
+  @override
+  Widget build(BuildContext context) {
+    final photo = user.profilePhoto as String? ?? '';
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      maxChildSize: 0.9,
+      minChildSize: 0.35,
+      expand: false,
+      builder: (_, scrollCtl) => ListView(
+        controller: scrollCtl,
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
+        children: [
+          // ── Profile photo + name ────────────────────────────────
+          Center(child: CircleAvatar(
+            radius: 38,
+            backgroundColor: C.green.withValues(alpha: .15),
+            backgroundImage: photo.isNotEmpty ? NetworkImage(Api.resolveUrl(photo)) : null,
+            child: photo.isEmpty
+                ? Text(user.initials, style: const TextStyle(
+                    fontSize: 26, fontWeight: FontWeight.w800, color: C.green))
+                : null)),
+          const SizedBox(height: 14),
+          Center(child: Text(user.fullName,
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
+              color: dk ? C.textD : C.textL))),
+          const SizedBox(height: 4),
+          Center(child: Text('@${user.username}',
+            style: TextStyle(fontSize: 13, color: dk ? C.subD : C.subL))),
+          const SizedBox(height: 20),
+          // ── Info rows ──────────────────────────────────────────
+          ..._infoRow(Icons.alternate_email_rounded, 'Username', '@${user.username}', dk),
+          if (user.bio != null && user.bio!.isNotEmpty)
+            ..._infoRow(Icons.info_outline_rounded, 'Bio', user.bio!, dk),
+          if (user.locationText != null && user.locationText!.isNotEmpty)
+            ..._infoRow(Icons.location_on_outlined, 'Location', user.locationText!, dk),
+          ..._infoRow(Icons.article_outlined, 'Posts', '${user.posts}', dk),
+          ..._infoRow(Icons.people_outline_rounded, 'Followers', '${user.followers}', dk),
+          ..._infoRow(Icons.person_add_outlined, 'Following', '${user.following}', dk),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _infoRow(IconData icon, String label, String value, bool dk) {
+    if (value.trim().isEmpty) return [];
+    return [
+      Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: dk ? Colors.white.withValues(alpha: .05) : Colors.black.withValues(alpha: .03),
+          borderRadius: BorderRadius.circular(12)),
+        child: Row(children: [
+          Icon(icon, size: 18, color: C.green),
+          const SizedBox(width: 12),
+          SizedBox(width: 80,
+            child: Text(label, style: TextStyle(fontSize: 13,
+              fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL))),
+          Expanded(child: Text(value,
+            style: TextStyle(fontSize: 14, color: dk ? C.textD : C.textL))),
+        ]),
+      ),
+    ];
   }
 }
 
@@ -3488,25 +3095,221 @@ class _AvatarBadge extends StatelessWidget {
   final Color iconColor;
   final bool dk;
   final VoidCallback onTap;
+  final int? count;
   const _AvatarBadge(
       {required this.icon,
       required this.background,
       this.iconColor = Colors.white,
       required this.dk,
-      required this.onTap});
+      required this.onTap,
+      this.count});
   @override
   Widget build(BuildContext context) => GestureDetector(
       onTap: onTap,
       child: Container(
-          width: 26,
-          height: 26,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
               color: background,
               shape: BoxShape.circle,
               border: Border.all(
                   color: dk ? const Color(0xFF121212) : Colors.white,
                   width: 2.5)),
-          child: Icon(icon, color: iconColor, size: 13)));
+          alignment: Alignment.center,
+          child: (count != null && count! > 0)
+              ? Text(_compact(count!),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w900,
+                      height: 1))
+              : Icon(icon, color: iconColor, size: 15)));
+
+  static String _compact(int n) {
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(n % 1000000 == 0 ? 0 : 1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(n % 1000 == 0 ? 0 : 1)}k';
+    return '$n';
+  }
+}
+
+// ── Notification bell with unread badge ────────────────────────────────────
+class _NotifBadgeBtn extends StatefulWidget {
+  const _NotifBadgeBtn();
+  @override
+  State<_NotifBadgeBtn> createState() => _NotifBadgeBtnState();
+}
+
+class _NotifBadgeBtnState extends State<_NotifBadgeBtn>
+    with SingleTickerProviderStateMixin {
+  int _unread = 0;
+  late AnimationController _animCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    )..repeat(reverse: true);
+    _load();
+  }
+
+  @override
+  void dispose() { _animCtrl.dispose(); super.dispose(); }
+
+  Future<void> _load() async {
+    try {
+      final count = await Api.getUnreadNotificationCount();
+      if (mounted) setState(() => _unread = count);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.push(context,
+          MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+        _load(); // refresh after returning
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+          child: Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.3),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Stack(clipBehavior: Clip.none, children: [
+              const Icon(Icons.notifications_outlined, color: Colors.white, size: 16),
+              if (_unread > 0)
+                Positioned(
+                  top: -4, right: -4,
+                  child: AnimatedBuilder(
+                    animation: _animCtrl,
+                    builder: (_, child) {
+                      final scale = 1.0 + (_animCtrl.value * 0.15);
+                      return Transform.scale(scale: scale, child: child);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: const BoxDecoration(
+                        color: C.err,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text('$_unread',
+                        style: const TextStyle(color: Colors.white,
+                          fontSize: 8, fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Demand badge button (shows active demand count with red indicator) ──────
+class _DemandBadgeBtn extends StatefulWidget {
+  final bool dk;
+  const _DemandBadgeBtn({required this.dk});
+  @override
+  State<_DemandBadgeBtn> createState() => _DemandBadgeBtnState();
+}
+
+class _DemandBadgeBtnState extends State<_DemandBadgeBtn>
+    with SingleTickerProviderStateMixin {
+  int _count = 0;
+  bool _hasNew = false;
+  late AnimationController _animCtrl;
+
+  static const _kLastViewedKey = 'demand_badge_last_viewed';
+  static const _kLastCountKey = 'demand_badge_last_count';
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    )..repeat(reverse: true);
+    _load();
+  }
+
+  @override
+  void dispose() { _animCtrl.dispose(); super.dispose(); }
+
+  Future<void> _load() async {
+    try {
+      final data = await Api.getMySupplyDemandListings(kind: 'demand');
+      final listings = data['listings'] as List? ?? [];
+      final count = listings.length;
+      final lastCount = int.tryParse(await AppStorage.read(key: _kLastCountKey) ?? '') ?? 0;
+      final lastViewed = await AppStorage.read(key: _kLastViewedKey);
+      final isNew = count > 0 && (lastViewed == null || count != lastCount);
+      if (mounted) setState(() { _count = count; _hasNew = isNew; });
+    } catch (_) {}
+  }
+
+  Future<void> _viewed() async {
+    await AppStorage.write(key: _kLastCountKey, value: '$_count');
+    await AppStorage.write(key: _kLastViewedKey, value: DateTime.now().toIso8601String());
+    if (mounted) setState(() => _hasNew = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dk = widget.dk;
+    return OutlinedButton(
+      onPressed: () async {
+        final nav = Navigator.of(context);
+        await _viewed();
+        if (mounted) { nav.push(
+          MaterialPageRoute(builder: (_) => const DemandHubScreen())); }
+      },
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: dk ? C.borderD : C.borderL),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      child: Stack(clipBehavior: Clip.none, children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Text('Demand',
+            style: TextStyle(
+              color: dk ? C.textD : C.textL,
+              fontWeight: FontWeight.w600,
+              fontSize: 13)),
+        ),
+        if (_count > 0)
+          Positioned(
+            top: -8,
+            right: -14,
+            child: AnimatedBuilder(
+              animation: _animCtrl,
+              builder: (_, child) {
+                final scale = _hasNew ? 1.0 + (_animCtrl.value * 0.15) : 1.0;
+                return Transform.scale(scale: scale, child: child);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _hasNew ? C.err : C.subD,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('$_count',
+                  style: const TextStyle(color: Colors.white,
+                    fontSize: 10, fontWeight: FontWeight.w800)),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
 }
 
 // ── Profile skeleton ─────────────────────────────────────────────────────────

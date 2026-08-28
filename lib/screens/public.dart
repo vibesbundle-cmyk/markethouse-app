@@ -8,8 +8,10 @@ import '../models/user.dart';
 import '../models/chat.dart';
 import '../services/api.dart';
 import 'chat_window.dart';
+import 'status_view.dart';
 import 'post_swipe_viewer.dart';
 import 'profile.dart' show BusinessInfoSheet;
+import '../widgets/status_ring.dart';
 // ── Follow list bottom sheet (shared by public & private) ───────────────────
 class FollowListSheet extends StatefulWidget {
   final int userId;
@@ -128,12 +130,14 @@ class _FollowListSheetState extends State<FollowListSheet> {
                           onPressed: () async {
                             final uid = (u['id'] as num?)?.toInt() ?? 0;
                             if (uid == 0) return;
-                            if (isFollowing) {
-                              await Api.unfollow(uid);
-                            } else {
-                              await Api.follow(uid);
-                            }
-                            _load();
+                            try {
+                              if (isFollowing) {
+                                await Api.unfollow(uid);
+                              } else {
+                                await Api.follow(uid);
+                              }
+                              _load();
+                            } catch (_) {}
                           },
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(color: isFollowing ? (dk ? C.subD : C.subL) : C.green),
@@ -175,6 +179,7 @@ class _PublicState extends State<Public> with TickerProviderStateMixin {
   User? _user;
   bool _loading = true;
   bool _error = false;
+  List<Map> _statuses = [];
 
   @override
   void initState() {
@@ -194,9 +199,48 @@ class _PublicState extends State<Public> with TickerProviderStateMixin {
         _loading = false;
       });
       }
+      _loadStatuses();
     } catch (_) {
       if (mounted) setState(() { _error = true; _loading = false; });
     }
+  }
+
+  /// This profile's active (<24h) statuses, oldest first — drives the ring
+  /// around the avatar and the tap-to-watch behaviour.
+  Future<void> _loadStatuses() async {
+    final uid = _user?.id ?? 0;
+    if (uid == 0) return;
+    try {
+      final all = await Api.getStatuses();
+      final now = DateTime.now();
+      final mine = all
+          .where((s) =>
+              (s['user_id'] as num?)?.toInt() == uid &&
+              !(DateTime.tryParse(s['created_at'] as String? ?? '')
+                      ?.isBefore(now.subtract(const Duration(hours: 24))) ??
+                  true))
+          .toList()
+        ..sort((a, b) => (DateTime.tryParse(a['created_at'] as String? ?? '') ??
+                DateTime.now())
+            .compareTo(DateTime.tryParse(b['created_at'] as String? ?? '') ??
+                DateTime.now()));
+      if (mounted) setState(() => _statuses = mine.cast<Map>());
+    } catch (_) {}
+  }
+
+  bool get _hasUnseenStatus =>
+      _statuses.isNotEmpty && !_statuses.every((s) => s['viewed'] == true);
+
+  Future<void> _openStatus() async {
+    if (_statuses.isEmpty || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StatusPlayerScreen(groups: [_statuses]),
+      ),
+    );
+    // Watching may clear the ring.
+    if (mounted) _loadStatuses();
   }
 
   void _showFollowList({required bool showFollowers}) {
@@ -260,6 +304,9 @@ class _PublicState extends State<Public> with TickerProviderStateMixin {
               user: _user!,
               dk: dk,
               following: _following,
+              statusCount: _statuses.length,
+              statusUnseen: _hasUnseenStatus,
+              onOpenStatus: _openStatus,
               onFollow: () async {
                 final uid = _targetUserId;
                 if (uid == 0) return;
@@ -322,11 +369,17 @@ class _PublicState extends State<Public> with TickerProviderStateMixin {
 class _PubHeader extends StatelessWidget {
   final User user;
   final bool dk, following;
+  final int statusCount;
+  final bool statusUnseen;
+  final VoidCallback? onOpenStatus;
   final VoidCallback onFollow, onFollowersTap, onFollowingTap;
   const _PubHeader({
     required this.user,
     required this.dk,
     required this.following,
+    this.statusCount = 0,
+    this.statusUnseen = false,
+    this.onOpenStatus,
     required this.onFollow,
     required this.onFollowersTap,
     required this.onFollowingTap,
@@ -358,13 +411,28 @@ class _PubHeader extends StatelessWidget {
               top: _headerH - _avatarR,
               left: 16,
               child: Stack(clipBehavior: Clip.none, children: [
-                _AvatarRing(
-                  profilePhoto: profilePhoto,
-                  initials: user.initials,
-                  dk: dk,
-                  radius: _avatarR,
-                  onTap: hasPhoto ? () => _zoomPhoto(context, Api.resolveUrl(profilePhoto)) : null,
-                ),
+                if (statusCount > 0 && statusUnseen)
+                  StatusRingAvatar(
+                    radius: _avatarR,
+                    segments: statusCount,
+                    viewed: false,
+                    onTap: onOpenStatus,
+                    child: _AvatarRing(
+                      profilePhoto: profilePhoto,
+                      initials: user.initials,
+                      dk: dk,
+                      radius: _avatarR,
+                      onTap: onOpenStatus,
+                    ),
+                  )
+                else
+                  _AvatarRing(
+                    profilePhoto: profilePhoto,
+                    initials: user.initials,
+                    dk: dk,
+                    radius: _avatarR,
+                    onTap: hasPhoto ? () => _zoomPhoto(context, Api.resolveUrl(profilePhoto)) : null,
+                  ),
                 if (user.isBusiness)
                   Positioned(
                     right: -2,
@@ -702,7 +770,7 @@ class _PubPostGridState extends State<_PubPostGrid> {
         final mediaUrl = p['media_url'] as String? ?? '';
         final isVideo = p['media_type'] == 'video';
         final likeCount = (p['like_count'] as num?)?.toInt() ?? 0;
-        final commentCount = (p['comment_count'] as num?)?.toInt() ?? 0;
+        final viewCount = (p['views'] as num?)?.toInt() ?? 0;
         return GestureDetector(
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PostSwipeViewer(
             posts: _posts!.cast<Map>(),
@@ -724,9 +792,9 @@ class _PubPostGridState extends State<_PubPostGrid> {
                   const SizedBox(width: 3),
                   Text('$likeCount', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
                   const SizedBox(width: 10),
-                  const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 12),
+                  const Icon(Icons.visibility_rounded, color: Colors.white, size: 12),
                   const SizedBox(width: 3),
-                  Text('$commentCount', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                  Text('$viewCount', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
                 ]),
               ),
             ),

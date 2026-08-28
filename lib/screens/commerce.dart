@@ -1,9 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:provider/provider.dart';
-import '../widgets/in_app_gallery_picker.dart';
-import '../widgets/location_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 import '../widgets/location_map.dart';
 import '../theme/colors.dart';
 import '../theme/dark.dart';
@@ -11,8 +11,8 @@ import 'chat_window.dart';
 import '../models/chat.dart';
 import '../theme/state.dart';
 import '../services/api.dart';
-import '../services/safe_file.dart';
 import '../services/location_service.dart';
+import '../services/ws_service.dart';
 
 // ── Sort options ──────────────────────────────────────────────────────────────
 const _kSortOptions = [
@@ -21,65 +21,13 @@ const _kSortOptions = [
   ('price_asc',  'Lowest Price'),
   ('price_desc', 'Highest Price'),
   ('popular',    'Most Popular'),
-  ('verified',   'Verified Businesses'),
-  ('in_stock',   'In Stock Only'),
-  ('free_delivery', 'Free Delivery'),
-  ('open_now',   'Open Now'),
 ];
 
-// Commerce browsing is now one scrollable grid per tab (see _ListingPageState)
-// instead of separate Recommended/Trending/Nearby/Newest rows.
-
-// Extra type-specific fields: (key, label, hint, isNumeric)
-const _kExtraFields = <String, List<(String, String, String, bool)>>{
-  'product': [
-    ('sku', 'SKU (optional)', 'e.g. SKU-1023 — skip if you don\'t use one', false),
-    ('brand', 'Brand', '', false),
-    ('condition', 'Condition', 'New / Used', false),
-  ],
-  'service': [
-    ('duration', 'Duration', 'e.g. 2 hours', false),
-    ('availability', 'Availability', 'e.g. Mon–Fri, 9am–5pm', false),
-  ],
-  'job': [
-    ('company', 'Company', '', false),
-    ('salary', 'Salary', 'e.g. ₦150,000/month', false),
-    ('employment_type', 'Employment Type', 'Full-time / Part-time / Contract', false),
-    ('experience', 'Experience', 'e.g. 2+ years', false),
-    ('qualification', 'Qualification', '', false),
-    ('deadline', 'Application Deadline', 'YYYY-MM-DD', false),
-    ('apply_link', 'Apply Link', 'https://…', false),
-  ],
-  'hotel': [
-    ('room_name', 'Room Name', '', false),
-    ('max_guests', 'Maximum Guests', '', true),
-    ('amenities', 'Amenities', 'Wifi, Pool, Parking', false),
-    ('available_rooms', 'Available Rooms', '', true),
-    ('check_in', 'Check-in Time', 'e.g. 2:00 PM', false),
-    ('check_out', 'Check-out Time', 'e.g. 11:00 AM', false),
-  ],
-  'property': [
-    ('property_type', 'Property Type', 'House / Apartment / Land', false),
-    ('sale_or_rent', 'Sale or Rent', 'sale / rent', false),
-    ('bedrooms', 'Bedrooms', '', true),
-    ('bathrooms', 'Bathrooms', '', true),
-    ('area', 'Area (sqm)', '', true),
-  ],
-  'vehicle': [
-    ('model', 'Model', '', false),
-    ('year', 'Year', '', true),
-    ('fuel', 'Fuel Type', 'Petrol / Diesel / Electric', false),
-    ('transmission', 'Transmission', 'Automatic / Manual', false),
-    ('mileage', 'Mileage', '', false),
-  ],
-  'event': [
-    ('date', 'Date', 'YYYY-MM-DD', false),
-    ('time', 'Time', 'e.g. 6:00 PM', false),
-    ('venue', 'Venue', '', false),
-    ('ticket_price', 'Ticket Price', '', true),
-    ('registration_link', 'Registration Link', 'https://…', false),
-  ],
-};
+// Category chips shown above the Instagram grid
+const _kCategoryChips = [
+  'All', 'Fashion', 'Electronics', 'Phones', 'Coding',
+  'Food', 'Beauty', 'Home', 'Sports', 'Books', 'Jobs',
+];
 
 class Commerce extends StatefulWidget {
   const Commerce({super.key});
@@ -92,16 +40,13 @@ class _CommerceState extends State<Commerce> with SingleTickerProviderStateMixin
   bool _searching = false;
   String _searchQuery = '';
   String _activeSort = 'newest';
+  String _selectedCategory = 'All';
   final _searchCtl = TextEditingController();
 
   final List<_CommerceTab> _tabs = const [
     _CommerceTab('Products',   'product',   Icons.inventory_2_outlined),
     _CommerceTab('Services',   'service',   Icons.design_services_outlined),
     _CommerceTab('Jobs',       'job',       Icons.work_outline_rounded),
-    _CommerceTab('Hotels',     'hotel',     Icons.hotel_outlined),
-    _CommerceTab('Properties', 'property',  Icons.apartment_outlined),
-    _CommerceTab('Vehicles',   'vehicle',   Icons.directions_car_outlined),
-    _CommerceTab('Events',     'event',     Icons.event_outlined),
   ];
 
   @override
@@ -179,22 +124,6 @@ class _CommerceState extends State<Commerce> with SingleTickerProviderStateMixin
                 width: 8, height: 8,
                 decoration: const BoxDecoration(color: C.green, shape: BoxShape.circle))),
           ]),
-          // Create listing (business accounts)
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded, size: 26),
-            color: C.green,
-            onPressed: () {
-              final isBusiness = context.read<AppState>().user?.isBusiness ?? false;
-              if (!isBusiness) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Switch to a business account in Settings to post listings')));
-                return;
-              }
-              _showCreateListing(context, dk, _tabs[_tab.index].type).then((posted) {
-                if (posted == true && mounted) setState(() => _refreshTick++);
-              });
-            },
-          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
@@ -217,237 +146,68 @@ class _CommerceState extends State<Commerce> with SingleTickerProviderStateMixin
           ),
         ),
       ),
-      body: TabBarView(
-        controller: _tab,
-        children: _tabs.map((t) => _ListingPage(
-          key: ValueKey('${t.type}_$_refreshTick'),
-          type: t.type, dk: dk, sort: _activeSort, searchQuery: _searchQuery,
-        )).toList(),
-      ),
+      body: Column(children: [
+        // ── Category chips (Instagram-style) ──────────────────────────
+        Container(
+          height: 44,
+          color: dk ? const Color(0xFF0F0F10) : Colors.white,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            scrollDirection: Axis.horizontal,
+            itemCount: _kCategoryChips.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (_, i) {
+              final cat = _kCategoryChips[i];
+              final sel = cat == _selectedCategory;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedCategory = cat),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: sel ? C.green : (dk ? C.surf2D : const Color(0xFFF2F2F7)),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(cat, style: TextStyle(
+                    fontSize: 12.5, fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                    color: sel ? Colors.white : (dk ? C.textD : const Color(0xFF1C1C1E)))),
+                ),
+              );
+            },
+          ),
+        ),
+        // ── Sort + filter row ──────────────────────────────────────────
+        if (_activeSort != 'newest' || _selectedCategory != 'All')
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            color: dk ? const Color(0xFF0F0F10) : Colors.white,
+            child: Row(children: [
+              if (_selectedCategory != 'All')
+                _FilterTag(label: _selectedCategory, onClear: () => setState(() => _selectedCategory = 'All')),
+              if (_activeSort != 'newest') ...[
+                const SizedBox(width: 8),
+                _FilterTag(label: _activeSort.replaceAll('_', ' '), onClear: () => setState(() => _activeSort = 'newest')),
+              ],
+            ]),
+          ),
+        // ── Grid ───────────────────────────────────────────────────────
+        Expanded(
+          child: TabBarView(
+            controller: _tab,
+            children: _tabs.map((t) => _ListingPage(
+              key: ValueKey('${t.type}_$_refreshTick'),
+              type: t.type, dk: dk, sort: _activeSort,
+              searchQuery: _searchQuery, category: _selectedCategory == 'All' ? null : _selectedCategory,
+            )).toList(),
+          ),
+        ),
+      ]),
     );
   }
   // Bumped after a successful post so every tab's page remounts (and
   // therefore refetches) instead of the new listing only showing up after a
   // manual pull-to-refresh or leaving/returning to the screen.
   int _refreshTick = 0;
-
-  Future<bool?> _showCreateListing(BuildContext ctx, bool dk, String initialType) {
-    String type = initialType;
-    final titleCtl = TextEditingController();
-    final descCtl = TextEditingController();
-    final priceCtl = TextEditingController();
-    final discountCtl = TextEditingController();
-    final categoryCtl = TextEditingController();
-    final locationCtl = TextEditingController();
-    final stockCtl = TextEditingController();
-    bool delivery = false;
-    double? lat, lng;
-    bool locatingMe = false;
-    List<XFile> images = [];
-    final extraCtls = <String, TextEditingController>{};
-    bool posting = false;
-
-    return showModalBottomSheet<bool>(
-      context: ctx, isScrollControlled: true, backgroundColor: Colors.transparent,
-      builder: (_) => StatefulBuilder(builder: (ctx2, ss) {
-        final fields = _kExtraFields[type] ?? [];
-        for (final f in fields) { extraCtls.putIfAbsent(f.$1, () => TextEditingController()); }
-        return DraggableScrollableSheet(
-          initialChildSize: 0.92, maxChildSize: 0.95, minChildSize: 0.5,
-          builder: (_, ctrl) => Container(
-            decoration: BoxDecoration(color: dk ? C.surfD : Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
-            child: Column(children: [
-              const SizedBox(height: 10),
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: dk ? C.borderD : C.borderL, borderRadius: BorderRadius.circular(2))),
-              Expanded(child: ListView(controller: ctrl, padding: const EdgeInsets.fromLTRB(20, 16, 20, 20), children: [
-                Text('New Listing', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
-                const SizedBox(height: 16),
-                Wrap(spacing: 8, runSpacing: 8, children: _tabs.map((t) {
-                  final sel = type == t.type;
-                  return GestureDetector(
-                    onTap: () => ss(() => type = t.type),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(color: sel ? C.green : (dk ? C.surf2D : const Color(0xFFF2F2F7)), borderRadius: BorderRadius.circular(16)),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(t.icon, size: 14, color: sel ? Colors.white : (dk ? C.subD : C.subL)),
-                        const SizedBox(width: 5),
-                        Text(t.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: sel ? Colors.white : (dk ? C.subD : C.subL))),
-                      ]),
-                    ),
-                  );
-                }).toList()),
-                const SizedBox(height: 16),
-                SizedBox(height: 84, child: ListView(scrollDirection: Axis.horizontal, children: [
-                  ...images.map((f) => Padding(padding: const EdgeInsets.only(right: 8), child: Stack(clipBehavior: Clip.none, children: [
-                    ClipRRect(borderRadius: BorderRadius.circular(10), child: fileImage(f.path, width: 76, height: 76, fit: BoxFit.cover)),
-                    Positioned(top: -6, right: -6, child: GestureDetector(
-                      onTap: () => ss(() => images.remove(f)),
-                      child: Container(width: 20, height: 20, decoration: const BoxDecoration(color: Colors.black87, shape: BoxShape.circle),
-                        child: const Icon(Icons.close_rounded, color: Colors.white, size: 12)))),
-                  ]))),
-                  GestureDetector(
-                    onTap: () async {
-                      final remaining = 10 - images.length;
-                      if (remaining <= 0) {
-                        ScaffoldMessenger.of(ctx2).showSnackBar(
-                          const SnackBar(content: Text('You can add up to 10 images.')));
-                        return;
-                      }
-                      final picked = await pickImagesInApp(ctx2, maxImages: remaining);
-                      if (picked.isNotEmpty) ss(() => images.addAll(picked));
-                    },
-                    child: Container(width: 76, height: 76,
-                      decoration: BoxDecoration(color: dk ? C.surf2D : const Color(0xFFF2F2F7), borderRadius: BorderRadius.circular(10)),
-                      child: Icon(Icons.add_a_photo_outlined, color: dk ? C.subD : C.subL)),
-                  ),
-                ])),
-                const SizedBox(height: 16),
-                _CCField('Title / Name', titleCtl, dk),
-                const SizedBox(height: 12),
-                _CCField('Description', descCtl, dk, lines: 3),
-                const SizedBox(height: 12),
-                Row(children: [
-                  Expanded(child: _CCField('Price', priceCtl, dk, keyboard: TextInputType.number)),
-                  const SizedBox(width: 10),
-                  Expanded(child: _CCField('Discount Price', discountCtl, dk, keyboard: TextInputType.number)),
-                ]),
-                const SizedBox(height: 12),
-                _CCField('Category', categoryCtl, dk),
-                const SizedBox(height: 12),
-                _CCField('Location', locationCtl, dk),
-                const SizedBox(height: 6),
-                Wrap(spacing: 18, runSpacing: 6, children: [
-                  GestureDetector(
-                    onTap: locatingMe ? null : () async {
-                      ss(() => locatingMe = true);
-                      final pos = await LocationService().getCurrentPosition();
-                      if (pos != null) {
-                        lat = pos.latitude; lng = pos.longitude;
-                        if (locationCtl.text.trim().isEmpty) {
-                          final label = await LocationService()
-                              .resolveAddress(pos.latitude, pos.longitude);
-                          if (ctx2.mounted) {
-                            locationCtl.text =
-                                label ?? '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
-                          }
-                        }
-                      }
-                      ss(() => locatingMe = false);
-                      if (pos == null && ctx2.mounted) {
-                        ScaffoldMessenger.of(ctx2).showSnackBar(const SnackBar(
-                          content: Text('Could not get your location — check location permission')));
-                      }
-                    },
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(lat != null ? Icons.check_circle_rounded : Icons.my_location_rounded,
-                        size: 15, color: C.green),
-                      const SizedBox(width: 6),
-                      Text(locatingMe ? 'Getting location…' : lat != null ? 'Location set' : 'Use my current location',
-                        style: const TextStyle(fontSize: 12.5, color: C.green, fontWeight: FontWeight.w600)),
-                    ]),
-                  ),
-                  GestureDetector(
-                    onTap: () async {
-                      final picked = await pickLocationOnMap(ctx2,
-                          initial: (lat != null && lng != null)
-                              ? ll.LatLng(lat!, lng!)
-                              : null);
-                      if (picked == null || !ctx2.mounted) return;
-                      lat = picked.latitude;
-                      lng = picked.longitude;
-                      final label = await LocationService()
-                          .resolveAddress(picked.latitude, picked.longitude);
-                      if (ctx2.mounted) {
-                        ss(() {
-                          locationCtl.text = label ??
-                              '${picked.latitude.toStringAsFixed(4)}, ${picked.longitude.toStringAsFixed(4)}';
-                        });
-                      }
-                    },
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.map_outlined, size: 15, color: C.blue),
-                      SizedBox(width: 6),
-                      Text('Choose on map',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              color: C.blue,
-                              fontWeight: FontWeight.w600)),
-                    ]),
-                  ),
-                ]),
-                if (type == 'product')
-                  SwitchListTile(
-                    value: delivery, onChanged: (v) => ss(() => delivery = v),
-                    activeThumbColor: C.green, contentPadding: EdgeInsets.zero,
-                    title: Text('Delivery Available', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: dk ? C.textD : C.textL)),
-                  ),
-                if (type == 'product' || fields.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      tilePadding: EdgeInsets.zero,
-                      title: Text('Advanced details (optional)',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL)),
-                      children: [
-                        if (type == 'product')
-                          _CCField('Stock (leave blank if always in stock)', stockCtl, dk, keyboard: TextInputType.number),
-                        ...fields.map((f) => Padding(padding: const EdgeInsets.only(top: 12),
-                          child: _CCField(f.$2, extraCtls[f.$1]!, dk, hint: f.$3, keyboard: f.$4 ? TextInputType.number : TextInputType.text))),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: posting ? null : () async {
-                    final title = titleCtl.text.trim();
-                    if (title.isEmpty) return;
-                    ss(() => posting = true);
-                    try {
-                      final metadata = <String, dynamic>{};
-                      for (final f in fields) {
-                        final v = extraCtls[f.$1]!.text.trim();
-                        if (v.isNotEmpty) metadata[f.$1] = v;
-                      }
-                      await Api.createCommerceListing(
-                        listingType: type,
-                        title: title,
-                        description: descCtl.text.trim(),
-                        price: double.tryParse(priceCtl.text.trim()) ?? 0,
-                        discountPrice: double.tryParse(discountCtl.text.trim()) ?? 0,
-                        category: categoryCtl.text.trim(),
-                        stock: stockCtl.text.trim().isEmpty ? null : int.tryParse(stockCtl.text.trim()),
-                        deliveryAvailable: delivery,
-                        location: locationCtl.text.trim(),
-                        metadata: metadata,
-                        imageFiles: images,
-                        latitude: lat,
-                        longitude: lng,
-                      );
-                      if (ctx2.mounted) Navigator.pop(ctx2, true);
-                    } catch (e) {
-                      ss(() => posting = false);
-                      if (ctx2.mounted) {
-                        ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('Error: $e')));
-                      }
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(backgroundColor: C.green, foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                  child: posting
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Post Listing', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                ),
-              ])),
-            ]),
-          ),
-        );
-      }),
-    );
-  }
 }
 
 class _CommerceTab {
@@ -455,39 +215,12 @@ class _CommerceTab {
   const _CommerceTab(this.label, this.type, this.icon);
 }
 
-class _CCField extends StatelessWidget {
-  final String label;
-  final TextEditingController ctl;
-  final bool dk;
-  final String hint;
-  final int lines;
-  final TextInputType keyboard;
-  const _CCField(this.label, this.ctl, this.dk, {this.hint = '', this.lines = 1, this.keyboard = TextInputType.text});
-  @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: dk ? C.subD : C.subL)),
-    const SizedBox(height: 6),
-    TextField(
-      controller: ctl,
-      maxLines: lines,
-      keyboardType: keyboard,
-      style: TextStyle(fontSize: 14, color: dk ? C.textD : C.textL),
-      decoration: InputDecoration(
-        hintText: hint.isNotEmpty ? hint : null,
-        hintStyle: TextStyle(fontSize: 13, color: dk ? C.subD : C.subL),
-        filled: true, fillColor: dk ? C.surf2D : const Color(0xFFF2F2F7),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-      ),
-    ),
-  ]);
-}
-
 // ── Full listing page with Recommended/Trending/Nearby/Newest sections ────────
 class _ListingPage extends StatefulWidget {
   final String type, sort, searchQuery;
+  final String? category;
   final bool dk;
-  const _ListingPage({super.key, required this.type, required this.dk, required this.sort, required this.searchQuery});
+  const _ListingPage({super.key, required this.type, required this.dk, required this.sort, required this.searchQuery, this.category});
   @override
   State<_ListingPage> createState() => _ListingPageState();
 }
@@ -495,16 +228,39 @@ class _ListingPage extends StatefulWidget {
 class _ListingPageState extends State<_ListingPage> with AutomaticKeepAliveClientMixin {
   List _all = [];
   bool _loading = true;
+  StreamSubscription? _wsSub;
 
   @override bool get wantKeepAlive => true;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    _wsSub = WsService().stream.listen((msg) {
+      if (msg['type'] == 'commerce_listing' && mounted) {
+        // Render the new listing instantly from the socket payload (no refetch).
+        final m = msg['listing'];
+        if (m is Map && m['type'] == widget.type) {
+          final nid = m['id'];
+          if (!_all.any((e) => e is Map && e['id'] == nid)) {
+            setState(() {
+              _all = [m, ..._all];
+              _loading = false;
+            });
+          }
+        }
+        _load();
+      }
+    });
+  }
+
+  @override
+  void dispose() { _wsSub?.cancel(); super.dispose(); }
 
   @override
   void didUpdateWidget(_ListingPage old) {
     super.didUpdateWidget(old);
-    if (old.sort != widget.sort) _load();
+    if (old.sort != widget.sort || old.category != widget.category) _load();
   }
 
   Future<void> _load() async {
@@ -512,18 +268,15 @@ class _ListingPageState extends State<_ListingPage> with AutomaticKeepAliveClien
     try {
       List data;
       if (widget.sort == 'nearest') {
-        // Nearest needs the user's position so the backend returns a
-        // distance_km per listing. No fixed radius — sort by distance,
-        // don't drop far listings.
         final pos = await LocationService().getCurrentPosition();
         if (pos != null) {
           data = await Api.getCommerceListings(widget.type,
-              lat: pos.latitude, lng: pos.longitude);
+              lat: pos.latitude, lng: pos.longitude, category: widget.category);
         } else {
-          data = await Api.getCommerceListings(widget.type);
+          data = await Api.getCommerceListings(widget.type, category: widget.category);
         }
       } else {
-        data = await Api.getCommerceListings(widget.type);
+        data = await Api.getCommerceListings(widget.type, category: widget.category);
       }
       if (mounted) setState(() { _all = data; _loading = false; });
     } catch (_) { if (mounted) setState(() => _loading = false); }
@@ -531,6 +284,8 @@ class _ListingPageState extends State<_ListingPage> with AutomaticKeepAliveClien
 
   List get _filtered {
     var list = List.from(_all);
+    // Sold-out items never appear in the browse feed
+    list = list.where((i) => _inStock(i as Map)).toList();
     if (widget.searchQuery.isNotEmpty) {
       list = list.where((i) =>
         (i['title'] as String? ?? '').toLowerCase().contains(widget.searchQuery.toLowerCase()) ||
@@ -580,11 +335,50 @@ class _ListingPageState extends State<_ListingPage> with AutomaticKeepAliveClien
 
     return RefreshIndicator(onRefresh: _load, color: C.green,
       child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 20),
+        padding: const EdgeInsets.all(2),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2, crossAxisSpacing: 8, mainAxisSpacing: 10, childAspectRatio: 0.62),
+          crossAxisCount: 3, mainAxisSpacing: 2, crossAxisSpacing: 2, childAspectRatio: 1),
         itemCount: items.length,
-        itemBuilder: (_, i) => _ListingCard(item: items[i] as Map, dk: dk),
+        itemBuilder: (_, i) {
+          final item = items[i] as Map;
+          return _ListingCard(item: item, dk: dk,
+            onTap: () => openCommerceListingFeed(context, items, i, dk));
+        },
+      ),
+    );
+  }
+}
+
+// Opens the Instagram-style vertical listing feed starting at [startIndex].
+// Public so the profile commerce tab reuses the exact same flow.
+void openCommerceListingFeed(BuildContext context, List items, int startIndex, bool dk) {
+  final maps = items.whereType<Map>().toList();
+  Navigator.push(context, MaterialPageRoute(builder: (_) =>
+    _ListingFeedScreen(items: maps, startIndex: startIndex.clamp(0, maps.isEmpty ? 0 : maps.length - 1), dk: dk)));
+}
+
+// ── Instagram-style vertical feed opened from a grid card tap ────────────────
+class _ListingFeedScreen extends StatelessWidget {
+  final List<Map> items;
+  final int startIndex;
+  final bool dk;
+  const _ListingFeedScreen({required this.items, required this.startIndex, required this.dk});
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = startIndex < items.length ? items.sublist(startIndex) : items;
+    return Scaffold(
+      backgroundColor: dk ? C.bgD : Colors.white,
+      appBar: AppBar(
+        backgroundColor: dk ? C.surfD : Colors.white,
+        foregroundColor: dk ? C.textD : C.textL,
+        elevation: 0.5,
+        title: const Text('Listings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      ),
+      body: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 20),
+        itemCount: shown.length,
+        itemBuilder: (_, i) => _ListingPost(item: shown[i], dk: dk),
       ),
     );
   }
@@ -597,20 +391,123 @@ class _ListingPageState extends State<_ListingPage> with AutomaticKeepAliveClien
 class _ListingCard extends StatefulWidget {
   final Map item;
   final bool dk;
-  const _ListingCard({required this.item, required this.dk});
+  final VoidCallback? onTap;
+  const _ListingCard({required this.item, required this.dk, this.onTap});
   @override
   State<_ListingCard> createState() => _ListingCardState();
 }
 
 class _ListingCardState extends State<_ListingCard> {
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final dk = widget.dk;
+    final images = item['images'] as List? ?? [];
+    final imgUrl = images.isNotEmpty ? Api.resolveUrl(images[0] as String) : null;
+    final price = item['price'];
+    final discountPrice = item['discount_price'];
+    final hasDiscount = discountPrice != null && (discountPrice as num) > 0 && discountPrice != price;
+    final pctOff = hasDiscount && price != null
+        ? (100 - ((discountPrice) / (price as num) * 100)).round()
+        : 0;
+    final isInStock = _inStock(item);
+    final username = item['username'] as String? ?? '';
+    final profilePhoto = item['profile_photo'] as String? ?? '';
+
+    return GestureDetector(
+      onTap: widget.onTap ?? () => _showListingDetail(context, item, dk),
+      child: Stack(children: [
+        // Full-bleed image
+        Positioned.fill(
+          child: imgUrl != null
+            ? Image.network(imgUrl, fit: BoxFit.cover,
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : _PlaceholderImg(dk: dk),
+                errorBuilder: (_, __, ___) => _PlaceholderImg(dk: dk))
+            : _PlaceholderImg(dk: dk),
+        ),
+        // Discount tag top-left
+        if (hasDiscount)
+          Positioned(top: 0, left: 0, child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: const BoxDecoration(
+              color: Color(0xFFE0261E),
+              borderRadius: BorderRadius.only(bottomRight: Radius.circular(6))),
+            child: Text('-$pctOff%', style: const TextStyle(
+              color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+          )),
+        // Username + profile pic top-right
+        Positioned(top: 4, right: 4, child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (username.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+              child: Text('@$username', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(width: 4),
+          ],
+          _AvatarMini(photoUrl: profilePhoto, dk: dk),
+        ])),
+        // Price bottom-left overlay
+        if (price != null)
+          Positioned(bottom: 0, left: 0, right: 0, child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter, end: Alignment.topCenter,
+                colors: [Colors.black.withValues(alpha: 0.65), Colors.transparent])),
+            child: Text('₦${_fmt(hasDiscount ? discountPrice : price)}',
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800)),
+          )),
+        // Out of stock overlay
+        if (!isInStock)
+          Positioned.fill(child: Container(
+            color: Colors.black.withValues(alpha: 0.45),
+            child: const Center(child: Text('OUT OF STOCK',
+              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.3))))),
+      ]),
+    );
+  }
+
+  String _fmt(dynamic v) {
+    final n = (v as num).toDouble();
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}k';
+    return n.toStringAsFixed(0);
+  }
+}
+
+// ── Instagram-style vertical listing post ─────────────────────────────────────
+class _ListingPost extends StatefulWidget {
+  final Map item;
+  final bool dk;
+  const _ListingPost({required this.item, required this.dk});
+  @override
+  State<_ListingPost> createState() => _ListingPostState();
+}
+
+class _ListingPostState extends State<_ListingPost> {
   late int _upvotes = (widget.item['upvotes'] as num?)?.toInt() ?? 0;
   late int _downvotes = (widget.item['downvotes'] as num?)?.toInt() ?? 0;
   late int _myVote = (widget.item['my_vote'] as num?)?.toInt() ?? 0;
   bool _voting = false;
+  bool _saved = false;
+  bool _inCart = false;
+  bool _isFollowing = false;
+  late int _commentCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _commentCount = (widget.item['comment_count'] as num?)?.toInt() ?? 0;
+    _saved = widget.item['is_saved'] == true;
+    _inCart = widget.item['is_in_cart'] == true;
+    _isFollowing = widget.item['is_following'] == true;
+  }
 
   Future<void> _vote(int v) async {
     if (_voting) return;
-    final newVote = _myVote == v ? 0 : v; // tapping the active one clears it
+    final newVote = _myVote == v ? 0 : v;
     final prevUp = _upvotes, prevDown = _downvotes, prevMy = _myVote;
     setState(() {
       _voting = true;
@@ -625,9 +522,59 @@ class _ListingCardState extends State<_ListingCard> {
       await Api.voteCommerceListing(id, newVote);
     } catch (_) {
       if (mounted) setState(() { _upvotes = prevUp; _downvotes = prevDown; _myVote = prevMy; });
-    } finally {
-      if (mounted) setState(() => _voting = false);
+    } finally { if (mounted) setState(() => _voting = false); }
+  }
+
+  Future<void> _toggleSave() async {
+    final was = _saved;
+    setState(() => _saved = !_saved);
+    try {
+      final id = (widget.item['id'] as num).toInt();
+      if (!was) { await Api.savePost(id); } else { await Api.unsavePost(id); }
+    } catch (_) { if (mounted) setState(() => _saved = was); }
+  }
+
+  Future<void> _toggleCart() async {
+    final was = _inCart;
+    setState(() => _inCart = !_inCart);
+    widget.item['is_in_cart'] = _inCart;
+    try {
+      final id = (widget.item['id'] as num).toInt();
+      if (!was) {
+        await Api.addToCart(id, 1);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to cart'), backgroundColor: C.green, behavior: SnackBarBehavior.floating));
+      } else {
+        await Api.removeFromCart(id);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _inCart = was);
+      widget.item['is_in_cart'] = was;
     }
+  }
+
+  Future<void> _toggleFollow() async {
+    final was = _isFollowing;
+    final userId = (widget.item['user_id'] as num?)?.toInt() ?? 0;
+    if (userId == 0) return;
+    setState(() => _isFollowing = !_isFollowing);
+    widget.item['is_following'] = _isFollowing;
+    try {
+      if (!was) { await Api.follow(userId); } else { await Api.unfollow(userId); }
+    } catch (_) {
+      if (mounted) setState(() => _isFollowing = was);
+      widget.item['is_following'] = was;
+    }
+  }
+
+  String _relTime(String iso) {
+    final t = DateTime.tryParse(iso);
+    if (t == null) return '';
+    final d = DateTime.now().difference(t);
+    if (d.inMinutes < 60) return '${d.inMinutes}m';
+    if (d.inHours < 24) return '${d.inHours}h';
+    if (d.inDays < 7) return '${d.inDays}d';
+    return '${t.day}/${t.month}/${t.year}';
   }
 
   @override
@@ -639,120 +586,155 @@ class _ListingCardState extends State<_ListingCard> {
     final price = item['price'];
     final discountPrice = item['discount_price'];
     final hasDiscount = discountPrice != null && (discountPrice as num) > 0 && discountPrice != price;
-    final pctOff = hasDiscount && price != null
-        ? (100 - ((discountPrice) / (price as num) * 100)).round()
-        : 0;
-    final isVerified = item['is_verified'] == true;
-    final isInStock = (item['stock'] as num?)?.toInt() != 0;
+    final username = item['username'] as String? ?? '';
+    final profilePhoto = item['profile_photo'] as String? ?? '';
+    final isInStock = _inStock(item);
+    final location = item['location'] as String? ?? '';
+    final createdAt = item['created_at'] as String? ?? '';
+    final commentCount = (item['comment_count'] as num?)?.toInt() ?? _commentCount;
+    final commentCountDisplay = commentCount > 0 ? '$commentCount' : '';
 
-    return GestureDetector(
-      onTap: () => _showListingDetail(context, item, dk),
-      child: Container(
-        decoration: BoxDecoration(
-          color: dk ? C.surfD : Colors.white,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: dk ? C.borderD : const Color(0xFFEEEEEE)),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 2),
+      color: dk ? C.bgD : Colors.white,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Header: avatar + username + location + dot + date + save + follow ──
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          child: Row(children: [
+            _AvatarMini(photoUrl: profilePhoto, dk: dk),
+            const SizedBox(width: 8),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(username.isNotEmpty ? '@$username' : 'seller',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: dk ? C.textD : C.textL)),
+              Row(children: [
+                if (location.isNotEmpty) ...[
+                  Flexible(child: Text(location, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL))),
+                  if (createdAt.isNotEmpty) ...[
+                    const SizedBox(width: 4),
+                    Text('·', style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL)),
+                    const SizedBox(width: 4),
+                    Text(_relTime(createdAt), style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL)),
+                  ],
+                ] else if (createdAt.isNotEmpty) ...[
+                  Text(_relTime(createdAt), style: TextStyle(fontSize: 11, color: dk ? C.subD : C.subL)),
+                ],
+              ]),
+            ])),
+            // Save
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleSave,
+              child: Padding(padding: const EdgeInsets.all(6),
+                child: Icon(_saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                  size: 20, color: _saved ? const Color(0xFFE0261E) : (dk ? C.subD : C.subL))),
+            ),
+            const SizedBox(width: 4),
+            // Follow / Following
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleFollow,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _isFollowing ? Colors.transparent : C.green,
+                  borderRadius: BorderRadius.circular(6),
+                  border: _isFollowing ? Border.all(color: dk ? C.borderD : C.borderL) : null,
+                ),
+                child: Text(_isFollowing ? 'Following' : 'Follow',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                    color: _isFollowing ? (dk ? C.subD : C.subL) : Colors.white)),
+              ),
+            ),
+          ]),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(
+        // ── Image (tap opens the full detail sheet) ───────────────
+        if (imgUrl != null)
+          GestureDetector(
+            onTap: () => _showListingDetail(context, item, dk),
             child: Stack(children: [
-              Positioned.fill(
-                child: imgUrl != null
-                  ? Image.network(imgUrl, fit: BoxFit.cover,
-                      loadingBuilder: (_, child, progress) =>
-                          progress == null ? child : _PlaceholderImg(dk: dk),
-                      errorBuilder: (_, __, ___) => _PlaceholderImg(dk: dk))
-                  : _PlaceholderImg(dk: dk),
+              AspectRatio(
+                aspectRatio: 1,
+                child: Image.network(imgUrl, fit: BoxFit.cover, width: double.infinity,
+                  loadingBuilder: (_, child, p) => p == null ? child : _PlaceholderImg(dk: dk),
+                  errorBuilder: (_, __, ___) => _PlaceholderImg(dk: dk)),
               ),
               if (hasDiscount)
-                Positioned(top: 0, left: 0, child: Container(
+                Positioned(top: 8, left: 8, child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFE0261E),
-                    borderRadius: BorderRadius.only(bottomRight: Radius.circular(6))),
-                  child: Text('-$pctOff%', style: const TextStyle(
-                    color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
-                )),
-              Positioned(top: 6, right: 6, child: GestureDetector(
-                onTap: () => _showReportSheet(context, item, dk),
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
-                  child: const Icon(Icons.flag_outlined, size: 14, color: Colors.white),
-                ),
-              )),
-              if (isVerified)
-                Positioned(bottom: 6, left: 6, child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(4)),
-                  child: GestureDetector(
-                    onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text("This seller's account is verified — not a claim about the item itself"),
-                        behavior: SnackBarBehavior.floating)),
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.verified_rounded, color: C.green, size: 10),
-                      SizedBox(width: 2),
-                      Text('Verified seller', style: TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w700)),
-                    ]),
-                  ),
+                  decoration: const BoxDecoration(color: Color(0xFFE0261E), borderRadius: BorderRadius.all(Radius.circular(6))),
+                  child: Text('-${(100 - (discountPrice) / (price as num) * 100).round()}%',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
                 )),
               if (!isInStock)
-                Positioned.fill(child: Container(
-                  color: Colors.black.withValues(alpha: 0.45),
+                Positioned.fill(child: Container(color: Colors.black45,
                   child: const Center(child: Text('OUT OF STOCK',
-                    style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.3))))),
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))))),
             ]),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(7, 6, 7, 8),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item['title'] as String? ?? '',
-                maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                  color: dk ? C.textD : const Color(0xFF1C1C1E), height: 1.25)),
-              const SizedBox(height: 5),
-              if (price != null)
-                Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('₦${_fmt(hasDiscount ? discountPrice : price)}',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800,
-                      color: dk ? C.textD : const Color(0xFF1C1C1E))),
-                  if (hasDiscount) ...[
-                    const SizedBox(width: 5),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 1.5),
-                      child: Text('₦${_fmt(price)}',
-                        style: TextStyle(fontSize: 10.5, color: dk ? C.subD : C.subL,
-                          decoration: TextDecoration.lineThrough)),
-                    ),
-                  ],
-                ]),
-              const SizedBox(height: 4),
-              Row(children: [
-                GestureDetector(
-                  onTap: () => _vote(1),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(_myVote == 1 ? Icons.thumb_up_rounded : Icons.thumb_up_outlined,
-                      size: 13, color: _myVote == 1 ? C.green : (dk ? C.subD : C.subL)),
-                    const SizedBox(width: 3),
-                    Text('$_upvotes', style: TextStyle(fontSize: 10.5, color: dk ? C.subD : C.subL)),
-                  ]),
-                ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: () => _vote(-1),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(_myVote == -1 ? Icons.thumb_down_rounded : Icons.thumb_down_outlined,
-                      size: 13, color: _myVote == -1 ? const Color(0xFFE0261E) : (dk ? C.subD : C.subL)),
-                    const SizedBox(width: 3),
-                    Text('$_downvotes', style: TextStyle(fontSize: 10.5, color: dk ? C.subD : C.subL)),
-                  ]),
-                ),
-              ]),
-            ]),
-          ),
-        ]),
-      ),
+        // ── Actions row: like | dislike | comment … cart ──────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
+          child: Row(children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _vote(1),
+              child: Padding(padding: const EdgeInsets.all(8), child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_myVote == 1 ? Icons.thumb_up_rounded : Icons.thumb_up_outlined,
+                  size: 22, color: _myVote == 1 ? C.green : (dk ? C.subD : C.subL)),
+                const SizedBox(width: 5),
+                Text('$_upvotes', style: TextStyle(fontSize: 13, color: dk ? C.subD : C.subL)),
+              ])),
+            ),
+            const SizedBox(width: 12),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _vote(-1),
+              child: Padding(padding: const EdgeInsets.all(8), child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_myVote == -1 ? Icons.thumb_down_rounded : Icons.thumb_down_outlined,
+                  size: 22, color: _myVote == -1 ? const Color(0xFFE0261E) : (dk ? C.subD : C.subL)),
+                const SizedBox(width: 5),
+                Text('$_downvotes', style: TextStyle(fontSize: 13, color: dk ? C.subD : C.subL)),
+              ])),
+            ),
+            const SizedBox(width: 12),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _showListingDetail(context, item, dk),
+              child: Padding(padding: const EdgeInsets.all(8), child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.chat_bubble_outline_rounded, size: 20, color: C.green),
+                if (commentCountDisplay.isNotEmpty) ...[
+                  const SizedBox(width: 5),
+                  Text(commentCountDisplay, style: const TextStyle(fontSize: 13, color: C.green)),
+                ],
+              ])),
+            ),
+            const Spacer(),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleCart,
+              child: Padding(padding: const EdgeInsets.all(8),
+                child: Icon(_inCart ? Icons.shopping_cart : Icons.shopping_cart_outlined,
+                  size: 22, color: _inCart ? C.green : (dk ? C.subD : C.subL))),
+            ),
+          ]),
+        ),
+        // ── Title + price ────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (price != null)
+              Text('₦${_fmt(hasDiscount ? discountPrice : price)}',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
+            const SizedBox(height: 2),
+            Text(item['title'] as String? ?? '',
+              maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: dk ? C.textD : C.textL, height: 1.3)),
+          ]),
+        ),
+        Container(height: 0.5, color: dk ? C.borderD : const Color(0xFFEEEEEE)),
+      ]),
     );
   }
 
@@ -773,53 +755,49 @@ class _PlaceholderImg extends StatelessWidget {
     child: Center(child: Icon(Icons.image_outlined, color: dk ? C.subD : C.subL, size: 28)));
 }
 
-void _showReportSheet(BuildContext context, Map item, bool dk) {
-  showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: Colors.transparent,
-    isScrollControlled: true,
-    builder: (bctx) => SafeArea(
+class _AvatarMini extends StatelessWidget {
+  final String photoUrl;
+  final bool dk;
+  const _AvatarMini({required this.photoUrl, required this.dk});
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto = photoUrl.isNotEmpty;
+    return Container(
+      width: 22, height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: dk ? C.surf2D : const Color(0xFFF2F2F7),
+        border: Border.all(color: Colors.white38, width: 1)),
+      child: hasPhoto
+        ? ClipOval(child: Image.network(Api.resolveUrl(photoUrl), fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Icon(Icons.person, size: 12, color: dk ? C.subD : C.subL)))
+        : Icon(Icons.person, size: 12, color: dk ? C.subD : C.subL),
+    );
+  }
+}
+
+class _FilterTag extends StatelessWidget {
+  final String label;
+  final VoidCallback onClear;
+  const _FilterTag({required this.label, required this.onClear});
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onClear,
       child: Container(
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-            color: dk ? C.surfD : Colors.white,
-            borderRadius: BorderRadius.circular(16)),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Text('Report this listing',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: dk ? C.textD : C.textL)),
-          ),
-          Text('Who reviews this: your admin team, via the reports queue.',
-              style: TextStyle(fontSize: 11.5, color: dk ? C.subD : C.subL)),
-          const SizedBox(height: 4),
-          ...Api.kListingReportReasons.map((reason) => ListTile(
-            dense: true,
-            title: Text(reason, style: TextStyle(fontSize: 13.5, color: dk ? C.textD : C.textL)),
-            onTap: () async {
-              Navigator.pop(bctx);
-              try {
-                final id = (item['id'] as num).toInt();
-                await Api.reportCommerceListing(id, reason);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Report sent — thanks for flagging it'),
-                      backgroundColor: C.green, behavior: SnackBarBehavior.floating));
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('Could not send report: $e'),
-                      backgroundColor: C.err, behavior: SnackBarBehavior.floating));
-                }
-              }
-            },
-          )),
+          color: C.green.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: C.green)),
+          const SizedBox(width: 4),
+          const Icon(Icons.close_rounded, size: 13, color: C.green),
         ]),
       ),
-    ),
-  );
+    );
+  }
 }
 
 // Asks whether the buyer wants to reply about this specific item (prefills
@@ -875,7 +853,29 @@ Future<void> _startChatWithSeller(BuildContext context, BuildContext sheetCtx, M
   );
   if (choice == null || !context.mounted) return;
 
-  Navigator.pop(sheetCtx); // close the listing detail sheet
+  // Close the listing detail sheet first, then navigate to chat
+  Navigator.pop(sheetCtx);
+  await Future.delayed(const Duration(milliseconds: 100));
+  if (!context.mounted) return;
+
+  // Replying about the item rides the listing along as a quoted tag in the
+  // chat composer — same pattern as replying to a status.
+  ChatMessage? quote;
+  if (choice == 'item') {
+    final imgs = (item['images'] as List? ?? []).cast<String>();
+    final priceStr = item['price'] != null ? '₦${item['price']}' : '';
+    quote = ChatMessage(
+      id: 0,
+      conversationId: 0,
+      senderId: sellerId,
+      receiverId: myId ?? 0,
+      content: priceStr.isEmpty ? title : '$priceStr — $title',
+      createdAt: DateTime.now(),
+      messageType: imgs.isNotEmpty ? 'image' : 'text',
+      mediaUrl: imgs.isNotEmpty ? Api.resolveUrl(imgs.first) : null,
+    );
+  }
+
   Navigator.push(context, MaterialPageRoute(builder: (_) => ChatWindow(
     conv: Conversation(
       id: 0,
@@ -883,126 +883,324 @@ Future<void> _startChatWithSeller(BuildContext context, BuildContext sheetCtx, M
         id: sellerId,
         username: item['username'] as String? ?? '',
         fullName: item['username'] as String? ?? '',
-        profilePhoto: '',
+        profilePhoto: item['profile_photo'] as String? ?? '',
       ),
       lastMessage: '', lastTime: '',
     ),
     initialMessage: choice == 'item' ? 'Hi, is "$title" still available?' : null,
+    initialReply: quote,
   )));
 }
 
 // ── Listing detail sheet — shared by every listing type ──────────────────────
 void _showListingDetail(BuildContext context, Map item, bool dk) {
-  final images = (item['images'] as List? ?? []).cast<String>();
-  final metadata = (item['metadata'] as Map?) ?? {};
-  final price = item['price'];
-  final discountPrice = item['discount_price'];
-  final hasDiscount = discountPrice != null && (discountPrice as num) > 0 && discountPrice != price;
-  bool saved = false;
+  Navigator.push(context, MaterialPageRoute(
+    builder: (_) => CommerceDetailScreen(item: item)));
+}
 
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (ctx) => StatefulBuilder(builder: (ctx2, ss) => DraggableScrollableSheet(
-      initialChildSize: 0.85, maxChildSize: 0.95, minChildSize: 0.5,
-      builder: (_, scrollCtl) => Container(
-        decoration: BoxDecoration(color: dk ? C.surfD : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
-        child: ListView(controller: scrollCtl, padding: EdgeInsets.zero, children: [
-          const SizedBox(height: 10),
-          Center(child: Container(width: 40, height: 4,
-            decoration: BoxDecoration(color: dk ? C.borderD : C.borderL, borderRadius: BorderRadius.circular(2)))),
-          const SizedBox(height: 14),
-          if (images.isNotEmpty)
-            SizedBox(
-              height: 220,
-              child: StatefulBuilder(builder: (ctx3, ss2) {
-                var page = 0;
-                return Stack(children: [
-                  PageView.builder(
-                    itemCount: images.length,
-                    onPageChanged: (i) => ss2(() => page = i),
-                    itemBuilder: (_, i) => Image.network(Api.resolveUrl(images[i]), fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _PlaceholderImg(dk: dk)),
+class CommerceDetailScreen extends StatefulWidget {
+  final Map item;
+  const CommerceDetailScreen({super.key, required this.item});
+  @override
+  State<CommerceDetailScreen> createState() => CommerceDetailScreenState();
+}
+
+class CommerceDetailScreenState extends State<CommerceDetailScreen> {
+  bool _inCart = false;
+  bool _saved = false;
+  bool _isFollowing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _inCart = widget.item['is_in_cart'] == true;
+    _saved = widget.item['is_saved'] == true;
+    _isFollowing = widget.item['is_following'] == true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dk = Theme.of(context).brightness == Brightness.dark;
+    final item = widget.item;
+    final images = (item['images'] as List? ?? []).cast<String>();
+    final metadata = (item['metadata'] as Map?) ?? {};
+    final price = item['price'];
+    final discountPrice = item['discount_price'];
+    final hasDiscount = discountPrice != null && (discountPrice as num) > 0 && discountPrice != price;
+    final stock = item['stock'];
+    final isInStock = _inStock(item);
+    final isOrderable = _isOrderable(item);
+    final dist = item['distance_km'];
+    final location = item['location'] as String? ?? '';
+    final category = item['category'] as String? ?? '';
+    final condition = item['condition'] as String? ?? '';
+    final negotiated = item['negotiable'] == true;
+    final borderColor = dk ? C.borderD : const Color(0xFF3A3A3A);
+
+    return Scaffold(
+      backgroundColor: dk ? C.bgD : Colors.white,
+      appBar: AppBar(
+        backgroundColor: dk ? C.bgD : Colors.white,
+        elevation: 0,
+        iconTheme: IconThemeData(color: dk ? C.textD : C.textL),
+        title: Text(item['title'] as String? ?? '',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dk ? C.textD : C.textL)),
+        actions: [
+          IconButton(
+            onPressed: () async {
+              final title = item['title'] as String? ?? 'a listing';
+              final priceStr = item['price'] != null ? ' — ₦${item['price']}' : '';
+              await Share.share('$title$priceStr on MarketHouse!\nhttps://markethous.netlify.app', subject: title);
+            },
+            icon: const Icon(Icons.share_outlined, size: 20)),
+          IconButton(
+            onPressed: () async {
+              final was = _saved;
+              setState(() => _saved = !_saved);
+              try {
+                final id = (item['id'] as num).toInt();
+                if (!was) { await Api.savePost(id); } else { await Api.unsavePost(id); }
+              } catch (_) { if (mounted) setState(() => _saved = was); }
+            },
+            icon: Icon(_saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+              color: _saved ? const Color(0xFFE0261E) : (dk ? C.subD : C.subL), size: 20)),
+        ],
+      ),
+      body: ListView(children: [
+        // ── Listing card (demand-match style) ──────────────────────
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: dk ? C.surfD : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: 1.5),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // ── Seller row ────────────────────────────────────────
+            Row(children: [
+              _AvatarMini(photoUrl: item['profile_photo'] as String? ?? '', dk: dk),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('@${item['username'] ?? ''}',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: dk ? C.textD : C.textL)),
+                if (item['is_verified'] == true)
+                  const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.verified_rounded, color: C.green, size: 12),
+                    SizedBox(width: 3),
+                    Text('Verified seller', style: TextStyle(fontSize: 10.5, color: C.green, fontWeight: FontWeight.w600)),
+                  ]),
+              ])),
+              GestureDetector(
+                onTap: () async {
+                  final userId = (item['user_id'] as num?)?.toInt() ?? 0;
+                  if (userId == 0) return;
+                  final was = _isFollowing;
+                  setState(() => _isFollowing = !_isFollowing);
+                  item['is_following'] = _isFollowing;
+                  try {
+                    if (!was) { await Api.follow(userId); } else { await Api.unfollow(userId); }
+                  } catch (_) {
+                    if (mounted) setState(() => _isFollowing = was);
+                    item['is_following'] = was;
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _isFollowing ? Colors.transparent : C.green,
+                    borderRadius: BorderRadius.circular(6),
+                    border: _isFollowing ? Border.all(color: dk ? C.borderD : C.borderL) : null,
                   ),
-                  if (images.length > 1)
-                    Positioned(bottom: 10, left: 0, right: 0,
-                      child: Row(mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(images.length, (i) => AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          width: i == page ? 16 : 6, height: 6,
-                          decoration: BoxDecoration(
-                            color: i == page ? Colors.white : Colors.white38,
-                            borderRadius: BorderRadius.circular(3)),
-                        )))),
-                ]);
-              }),
+                  child: Text(_isFollowing ? 'Following' : 'Follow',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                      color: _isFollowing ? (dk ? C.subD : C.subL) : Colors.white)),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            // ── Image ─────────────────────────────────────────────
+            if (images.isNotEmpty) ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                height: 220,
+                child: StatefulBuilder(builder: (ctx, ss) {
+                  var page = 0;
+                  return Stack(children: [
+                    PageView.builder(
+                      itemCount: images.length,
+                      onPageChanged: (i) => ss(() => page = i),
+                      itemBuilder: (_, i) => InteractiveViewer(
+                        maxScale: 4,
+                        child: Center(
+                          child: Image.network(Api.resolveUrl(images[i]), fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => _PlaceholderImg(dk: dk)),
+                        ),
+                      ),
+                    ),
+                    if (images.length > 1)
+                      Positioned(bottom: 8, left: 0, right: 0,
+                        child: Row(mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(images.length, (i) => AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
+                            width: i == page ? 16 : 6, height: 6,
+                            decoration: BoxDecoration(
+                              color: i == page ? Colors.white : Colors.white38,
+                              borderRadius: BorderRadius.circular(3)),
+                          )))),
+                  ]);
+                }),
+              ),
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(item['title'] as String? ?? '',
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
-              const SizedBox(height: 8),
-              if (price != null) Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            const SizedBox(height: 10),
+            // ── Title ─────────────────────────────────────────────
+            Text(item['title'] as String? ?? '',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dk ? C.textD : C.textL)),
+            const SizedBox(height: 4),
+            // ── Category + condition ──────────────────────────────
+            Row(children: [
+              if (category.isNotEmpty) ...[
+                Text(category, style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+                const SizedBox(width: 8),
+              ],
+              if (condition.isNotEmpty)
+                Text(condition, style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL)),
+            ]),
+            const SizedBox(height: 8),
+            // ── Price + negotiable + distance ─────────────────────
+            Row(children: [
+              if (price != null) ...[
                 if (hasDiscount) ...[
-                  Text('₦$discountPrice', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
+                  Text('₦$discountPrice', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
                   const SizedBox(width: 8),
-                  Text('₦$price', style: TextStyle(fontSize: 13, color: dk ? C.subD : C.subL, decoration: TextDecoration.lineThrough)),
+                  Text('₦$price', style: TextStyle(fontSize: 12, color: dk ? C.subD : C.subL, decoration: TextDecoration.lineThrough)),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(color: const Color(0xFFE0261E), borderRadius: BorderRadius.circular(4)),
                     child: Text('-${(100 - (discountPrice) / (price as num) * 100).round()}%',
-                      style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
+                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
                   ),
                 ] else
-                  Text('₦$price', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: dk ? C.textD : C.textL)),
-              ]),
-              const SizedBox(height: 14),
-              if ((item['description'] as String? ?? '').isNotEmpty) ...[
-                Text(item['description'], style: TextStyle(fontSize: 14, height: 1.5, color: dk ? C.textD : C.textL)),
-                const SizedBox(height: 14),
+                  Text('₦$price', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: C.green)),
               ],
-              // Shared + type-specific fields, shown generically
-              ..._detailRow('Category', item['category'], dk),
-              ..._detailRow('Brand', item['brand'], dk),
-              ..._detailRow('Condition', item['condition'], dk),
-              ..._detailRow('Stock', item['stock'] == null ? 'Always in stock' : ((item['stock'] as num).toInt() == 0 ? 'Out of stock' : item['stock'].toString()), dk),
-              ..._detailRow('SKU', item['sku'], dk),
-              ..._detailRow('Delivery', item['delivery_available'] == true ? 'Available' : null, dk),
-              ..._locationRow(context, item['location'], item, dk),
-              ...metadata.entries.map((e) => _detailRow(
-                  e.key.toString().replaceAll('_', ' ').split(' ').map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1)).join(' '),
-                  e.value?.toString(), dk)).expand((x) => x),
-              const SizedBox(height: 22),
-              Row(children: [
-                Expanded(child: ElevatedButton.icon(
-                  onPressed: () => _startChatWithSeller(context, ctx2, item, dk),
-                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
-                  label: const Text('Chat Seller'),
-                  style: ElevatedButton.styleFrom(backgroundColor: C.green, foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-                )),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: () => ss(() => saved = !saved),
-                  child: Container(width: 48, height: 48,
-                    decoration: BoxDecoration(border: Border.all(color: dk ? C.borderD : C.borderL),
-                      borderRadius: BorderRadius.circular(12)),
-                    child: Icon(saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                      color: saved ? const Color(0xFFE0261E) : (dk ? C.subD : C.subL))),
+              if (negotiated) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: C.warn.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('Negotiable', style: TextStyle(fontSize: 10, color: C.warn)),
                 ),
+              ],
+              const Spacer(),
+              if (dist != null) Row(children: [
+                Icon(Icons.near_me_rounded, size: 13, color: dk ? C.subD : C.subL),
+                const SizedBox(width: 3),
+                Text('${dist.toStringAsFixed(1)} km',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL)),
               ]),
             ]),
-          ),
-        ]),
-      ),
-    )),
-  );
+            // ── View locations chip ───────────────────────────────
+            if (location.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              GestureDetector(
+                onTap: () {},
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: dk ? C.surf2D : const Color(0xFFF0F0F0),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.location_on_outlined, size: 13, color: dk ? C.subD : C.subL),
+                      const SizedBox(width: 3),
+                      Text('View locations',
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: C.green)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            // ── Description ───────────────────────────────────────
+            if ((item['description'] as String? ?? '').isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(item['description'], style: TextStyle(fontSize: 14, height: 1.5, color: dk ? C.textD : C.textL)),
+            ],
+            // ── Metadata ──────────────────────────────────────────
+            ...metadata.entries.map((e) => _detailRow(
+              e.key.toString().replaceAll('_', ' ').split(' ').map((w) => w.isEmpty ? w : w[0].toUpperCase() + w.substring(1)).join(' '),
+              e.value?.toString(), dk)).expand((x) => x),
+            const SizedBox(height: 14),
+            // ── Add to Cart button ────────────────────────────────
+            if (isOrderable)
+              _inCart
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: C.green.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: C.green.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check_circle_outline_rounded, size: 16, color: C.green),
+                          const SizedBox(width: 6),
+                          Text('Added to Cart',
+                            style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 13)),
+                        ],
+                      ))
+                  : SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          try {
+                            final id = (item['id'] as int);
+                            await Api.addToCart(id, 1);
+                            setState(() => _inCart = true);
+                            item['is_in_cart'] = true;
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Added to cart'), backgroundColor: C.green, behavior: SnackBarBehavior.floating));
+                          } catch (e) {
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('$e'), backgroundColor: C.err, behavior: SnackBarBehavior.floating));
+                          }
+                        },
+                        icon: const Icon(Icons.add_shopping_cart_rounded, size: 16, color: C.green),
+                        label: const Text('Add to Cart', style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 13)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: C.green),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      )),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Products can be carted; jobs/services can't. Stock is stored as either a
+/// number or null (= unlimited) and may arrive stringified, so stay safe.
+bool _isOrderable(Map item) {
+  final t = item['type']?.toString();
+  if (t != null && t.isNotEmpty && t != 'product') return false;
+  return _inStock(item);
+}
+
+/// NULL/absent stock = unlimited; only an explicit 0 means out of stock.
+bool _inStock(Map item) {
+  final stock = item['stock'];
+  if (stock == null) return true;
+  final n = stock is num ? stock.toInt() : int.tryParse(stock.toString());
+  return n == null || n != 0;
 }
 
 List<Widget> _detailRow(String label, dynamic value, bool dk) {
@@ -1020,8 +1218,8 @@ List<Widget> _detailRow(String label, dynamic value, bool dk) {
   ];
 }
 
-/// Product/business location row — tappable to open a full-screen map when
-/// the listing carries coordinates, plain text otherwise.
+/// Product/business location row — green and tappable. With coordinates it
+/// drops an exact pin; otherwise the text is used as a maps search query.
 List<Widget> _locationRow(BuildContext ctx, dynamic value, Map item, bool dk) {
   if (value == null || value.toString().trim().isEmpty) return [];
   double? lat, lng;
@@ -1032,11 +1230,7 @@ List<Widget> _locationRow(BuildContext ctx, dynamic value, Map item, bool dk) {
     lng = rLng is num ? rLng.toDouble() : double.tryParse(rLng.toString());
   }
   final hasCoords = lat != null && lng != null;
-  final text = Text(value.toString(),
-      style: TextStyle(
-          fontSize: 13,
-          color: hasCoords ? C.green : (dk ? C.textD : C.textL),
-          fontWeight: hasCoords ? FontWeight.w600 : FontWeight.w400));
+  final label = value.toString();
   return [
     Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
@@ -1044,25 +1238,32 @@ List<Widget> _locationRow(BuildContext ctx, dynamic value, Map item, bool dk) {
         SizedBox(width: 100, child: Text('Location',
           style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: dk ? C.subD : C.subL))),
         Expanded(
-          child: hasCoords
-              ? GestureDetector(
-                  onTap: () => Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) => Scaffold(
-                        appBar: AppBar(title: const Text('Location')),
-                        body: LocationMap(
-                            me: ll.LatLng(lat!, lng!), showRoute: false),
-                      ),
-                    ),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () async {
+              final url = Uri.parse(hasCoords
+                ? 'https://www.google.com/maps/search/?api=1&query=$lat,$lng'
+                : 'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(label)}');
+              var launched = false;
+              try {
+                launched = await launchUrl(url, mode: LaunchMode.externalApplication);
+              } catch (_) {}
+              if (!launched && ctx.mounted) {
+                Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(title: const Text('Location')),
+                    body: LocationMap(me: ll.LatLng(lat ?? 0, lng ?? 0), showRoute: false),
                   ),
-                  child: Row(children: [
-                    Flexible(child: text),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.map_outlined, size: 14, color: C.green),
-                  ]),
-                )
-              : text,
+                ));
+              }
+            },
+            child: Row(children: [
+              Flexible(child: Text(label,
+                style: const TextStyle(fontSize: 13, color: C.green, fontWeight: FontWeight.w600))),
+              const SizedBox(width: 4),
+              const Icon(Icons.open_in_new_rounded, size: 13, color: C.green),
+            ]),
+          ),
         ),
       ]),
     ),
