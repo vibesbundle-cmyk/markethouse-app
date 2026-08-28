@@ -1255,7 +1255,7 @@ class _ChatWindowState extends State<ChatWindow> {
             _AttachBtn(
                 icon: Icons.photo_library_rounded,
                 label: 'Gallery',
-                color: Colors.purple,
+                color: C.green,
                 onTap: () {
                   Navigator.pop(ctx);
                   _pickGallery();
@@ -1435,8 +1435,7 @@ class _ChatWindowState extends State<ChatWindow> {
                                     end: Alignment.bottomRight,
                                     colors: [
                                       C.green.withValues(alpha: 0.55),
-                                      const Color(0xFF6A5AE0)
-                                          .withValues(alpha: 0.55),
+                                      C.green.withValues(alpha: 0.55),
                                     ]),
                           ),
                           child: hasHeader
@@ -1480,7 +1479,7 @@ class _ChatWindowState extends State<ChatWindow> {
                               child: !hasPhoto
                                   ? Text(u.initials,
                                       style: const TextStyle(
-                                          color: C.green,
+                                          color: Colors.white,
                                           fontWeight: FontWeight.w800,
                                           fontSize: 34))
                                   : null,
@@ -3086,7 +3085,7 @@ class _MessageBubble extends StatelessWidget {
   });
 
   static const _mineGradient = LinearGradient(
-      colors: [Color(0xFF6A5AE0), Color(0xFF9B5CF6)]);
+      colors: [Color(0xFF2E7D32), Color(0xFF43A047)]);
 
   Widget _buildLocationBubble(BuildContext context, ChatMessage msg) {
     try {

@@ -115,7 +115,8 @@ class ChatProvider extends ChangeNotifier {
       _conversations.sort((a, b) {
         if (a.isPinned && !b.isPinned) return -1;
         if (!a.isPinned && b.isPinned) return 1;
-        return 0;
+        // Sort by most recently updated first
+        return b.updatedAt.compareTo(a.updatedAt);
       });
       _lastFetchFailed = false;
     } catch (_) {

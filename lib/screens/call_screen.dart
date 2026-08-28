@@ -13,6 +13,9 @@ class CallScreen extends StatefulWidget {
   final String peerUsername;
   final int peerUserId;
   final bool isVideo;
+  /// Whether this user initiated the call. The receiver should pass false
+  /// so the screen only listens — it must NOT re-send a call_offer.
+  final bool isInitiator;
   const CallScreen({
     super.key,
     required this.peerName,
@@ -20,6 +23,7 @@ class CallScreen extends StatefulWidget {
     required this.peerUserId,
     this.peerPhoto,
     this.isVideo = false,
+    this.isInitiator = true,
   });
 
   @override
@@ -40,14 +44,19 @@ class _CallScreenState extends State<CallScreen>
   @override
   void initState() {
     super.initState();
-    _sendOffer();
+    if (widget.isInitiator) {
+      _sendOffer();
+      // Timeout after 30s — no answer (only for caller)
+      _timeout = Timer(const Duration(seconds: 30), () {
+        if (mounted && _phase == _CallPhase.ringing) {
+          _end('No answer');
+        }
+      });
+    } else {
+      // Receiver: already answered, mark as connected immediately
+      _phase = _CallPhase.connected;
+    }
     _listenForAnswer();
-    // Timeout after 30s — no answer
-    _timeout = Timer(const Duration(seconds: 30), () {
-      if (mounted && _phase == _CallPhase.ringing) {
-        _end('No answer');
-      }
-    });
   }
 
   void _sendOffer() {

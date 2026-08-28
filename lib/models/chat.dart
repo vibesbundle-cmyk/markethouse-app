@@ -51,6 +51,7 @@ class Conversation {
   final ChatUser otherUser;
   final String lastMessage;
   final String lastTime;
+  final String updatedAt;
   final int unreadCount;
   final bool isPinned;
   final bool isArchived;
@@ -68,6 +69,7 @@ class Conversation {
     required this.otherUser,
     required this.lastMessage,
     required this.lastTime,
+    this.updatedAt = '',
     this.unreadCount = 0,
     this.isPinned = false,
     this.isArchived = false,
@@ -93,6 +95,7 @@ class Conversation {
         }),
         lastMessage: j['last_message'] as String? ?? '',
         lastTime: j['last_time'] as String? ?? '',
+        updatedAt: j['updated_at'] as String? ?? '',
         unreadCount: (j['unread_count'] as num?)?.toInt() ?? 0,
         isPinned: j['is_pinned'] == true,
         isArchived: j['is_archived'] == true,
@@ -123,6 +126,7 @@ class Conversation {
         otherUser: otherUser ?? this.otherUser,
         lastMessage: lastMessage,
         lastTime: lastTime,
+        updatedAt: updatedAt,
         unreadCount: unreadCount ?? this.unreadCount,
         isPinned: isPinned ?? this.isPinned,
         isArchived: isArchived ?? this.isArchived,

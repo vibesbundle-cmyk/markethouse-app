@@ -22,11 +22,27 @@ class ChatList extends StatefulWidget {
 class _ChatListState extends State<ChatList> {
   String _filter = 'All';
   Map<int, List<Map>> _statusByUser = {};
+  Set<int> _favIds = {};
 
   @override
   void initState() {
     super.initState();
     _loadStatuses();
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final starred = await Api.getStarredMessages();
+      if (mounted) {
+        setState(() {
+          _favIds = starred
+              .map((m) => (m['conversation_id'] as num?)?.toInt() ?? 0)
+              .where((id) => id > 0)
+              .toSet();
+        });
+      }
+    } catch (_) {}
   }
 
   /// Active (<24h) statuses per user id — drives the rings on chat avatars.
@@ -112,8 +128,9 @@ class _ChatListState extends State<ChatList> {
           final active = cp.conversations.where((c) => !c.isArchived);
           List<Conversation> convs;
           switch (_filter) {
-            case 'Archived':
-              convs = archived;
+            case 'Favorites':
+              // Show conversations that have starred messages
+              convs = active.where((c) => c.unreadCount >= 0 && _favIds.contains(c.id)).toList();
             case 'Unread':
               convs = active.where((c) => c.unreadCount > 0).toList();
             default:
@@ -132,7 +149,7 @@ class _ChatListState extends State<ChatList> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   children: [
-                    for (final f in ['All', 'Unread', 'Archived'])
+                    for (final f in ['All', 'Unread', 'Favorites'])
                       Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: GestureDetector(
@@ -164,7 +181,7 @@ class _ChatListState extends State<ChatList> {
                                       : (dk ? C.subD : C.subL),
                                 ),
                               ),
-                              if (f == 'Archived' && archived.isNotEmpty) ...[
+                              if (f == 'Favorites' && _favIds.isNotEmpty) ...[
                                 const SizedBox(width: 6),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
@@ -175,7 +192,7 @@ class _ChatListState extends State<ChatList> {
                                         : C.green.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: Text('${archived.length}',
+                                  child: Text('${_favIds.length}',
                                       style: TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.w700,

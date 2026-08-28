@@ -111,6 +111,7 @@ class _ShellState extends State<Shell> {
                       peerUserId: callerId,
                       peerPhoto: photo,
                       isVideo: isVideo,
+                      isInitiator: false,
                     ),
                   ));
                 },
