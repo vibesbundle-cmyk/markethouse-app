@@ -10,7 +10,7 @@ import '../models/user.dart';
 class Api {
   static const _base = String.fromEnvironment(
     'BASE_URL',
-    defaultValue: kDebugMode ? 'http://192.168.100.95:8080' : '',
+    defaultValue: kDebugMode ? 'http://192.168.1.172:8080' : '',
   );
 
   static String get baseUrl => _base;
@@ -805,8 +805,10 @@ class Api {
     }
     return [];
   }
+
   static Future<List<Map<String, dynamic>>> searchMessages(String query) async {
-    final r = await _get('/messages/search?q=${Uri.encodeComponent(query)}', auth: true);
+    final r = await _get('/messages/search?q=${Uri.encodeComponent(query)}',
+        auth: true);
     if (r.statusCode == 200) {
       final data = _decode(r);
       return (data['messages'] as List? ?? []).cast<Map<String, dynamic>>();
@@ -947,6 +949,10 @@ class Api {
       int productId, int quantity) async {
     final r = await _post('/shop/cart',
         body: {'product_id': productId, 'quantity': quantity}, auth: true);
+    if (r.statusCode != 200) {
+      final msg = _decode(r)['error'] ?? 'Failed to add to cart';
+      throw Exception(msg);
+    }
     return _decode(r);
   }
 
