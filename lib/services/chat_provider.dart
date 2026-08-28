@@ -36,6 +36,17 @@ class ChatProvider extends ChangeNotifier {
   bool _loading = false;
   bool get loading => _loading;
 
+  /// Incoming call events (call_offer from WS). Streamed to the app shell
+  /// so it can show an incoming-call overlay regardless of which screen is active.
+  final StreamController<Map<String, dynamic>> _callController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get callEvents => _callController.stream;
+
+  /// Set when the last conversations fetch failed — lets the UI offer a
+  /// retry instead of pretending the user has no chats.
+  bool _lastFetchFailed = false;
+  bool get lastFetchFailed => _lastFetchFailed;
+
   int _myUserId = 0;
   int get myUserId => _myUserId;
 
@@ -74,17 +85,20 @@ class ChatProvider extends ChangeNotifier {
     } catch (_) {}
 
     if (freshId != _myUserId) {
-      // Different user — wipe everything
+      // Different user (or first load) — wipe everything so messages
+      // get re-parsed with the correct myUserId for isMine alignment.
       _messageCache.clear();
       _conversations.clear();
       _initialized = false;
     }
+    _myUserId = freshId;
+
+    // Reload every time so a failed first fetch (cold server, dropped
+    // request) recovers on pull-to-refresh instead of staying empty.
+    await _loadConversations();
 
     if (_initialized) return;
     _initialized = true;
-    _myUserId = freshId;
-
-    await _loadConversations();
     _wsSub?.cancel();
     await WsService().connect();
     _wsSub = WsService().stream.listen(_onWsMessage);
@@ -103,7 +117,10 @@ class ChatProvider extends ChangeNotifier {
         if (!a.isPinned && b.isPinned) return 1;
         return 0;
       });
-    } catch (_) {}
+      _lastFetchFailed = false;
+    } catch (_) {
+      _lastFetchFailed = true;
+    }
     _loading = false;
     notifyListeners();
   }
@@ -113,9 +130,24 @@ class ChatProvider extends ChangeNotifier {
     if (type == 'new_message' || type == 'conversation_updated') {
       final cid = (msg['conversation_id'] as num?)?.toInt();
       if (cid != null) _messageCache.remove(cid);
+      if (type == 'new_message' && cid != null && _myUserId != 0) {
+        final raw = msg['message'];
+        if (raw is Map<String, dynamic>) {
+          final incoming = ChatMessage.fromJson(raw, myUserId: _myUserId);
+          if (!incoming.isMine) {
+            final i = _conversations.indexWhere((c) => c.id == cid);
+            if (i != -1 && !_conversations[i].isMuted) {
+              _conversations[i] = _conversations[i]
+                  .copyWith(unreadCount: _conversations[i].unreadCount + 1);
+            }
+          }
+        }
+      }
       _loadConversations();
     } else if (type == 'live_location') {
       _liveLocationController.add(msg);
+    } else if (type == 'call_offer' || type == 'call_answer' || type == 'call_reject' || type == 'call_end') {
+      _callController.add(msg);
     } else if (type == 'presence') {
       final uid = (msg['user_id'] as num?)?.toInt();
       final online = msg['online'] == true;
@@ -136,6 +168,8 @@ class ChatProvider extends ChangeNotifier {
     String? mediaUrl,
     String? mediaType,
     int? replyToId,
+    double? latitude,
+    double? longitude,
   }) async {
     final resp = await Api.sendMessage(
       receiverId, content,
@@ -143,6 +177,8 @@ class ChatProvider extends ChangeNotifier {
       mediaUrl: mediaUrl,
       mediaType: mediaType,
       replyToId: replyToId,
+      latitude: latitude,
+      longitude: longitude,
     ); // let exceptions propagate so callers can show the real error
     final realConvId = (resp['conversation_id'] as num?)?.toInt() ?? conversationId;
     _messageCache.remove(conversationId);
@@ -172,6 +208,10 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void clearCache(int convId) => _messageCache.remove(convId);
+
+  /// Reloads the conversation list (unread badges, pins, archive flags…)
+  /// without touching the WS connection.
+  Future<void> refresh() => _loadConversations();
 
   @override
   void dispose() {

@@ -1009,6 +1009,7 @@ class _ChatWindowState extends State<ChatWindow> {
               ? _conv.otherUser.fullName
               : _conv.otherUser.username,
           peerUsername: _conv.otherUser.username,
+          peerUserId: _conv.otherUser.id,
           peerPhoto: _conv.otherUser.profilePhoto,
           isVideo: video,
         ),
